@@ -356,32 +356,49 @@ Based on commands used in [korenmiklos/ceo-value](https://github.com/korenmiklos
 - This is the most complex feature — requires a pre-processing pass before tokenization
 - **Test:** local macros from balance.do, foreach from balance.do
 
-### M15: `tempfile`, `preserve`/`restore`
+### M15: `save` to tables, `tempfile`, `preserve`/`restore`
 
-Stata uses `tempfile` as a workaround for its single-dataset model. In DuckDB we can do better: tempfiles become real tables in a private schema, and preserve/restore becomes a checkpoint in the CTE chain.
+**Enhanced `save` — file vs table detection:**
+
+`save` currently only writes to disk. We extend it to create in-memory DuckDB tables when no file extension is detected:
+
+| Syntax | Behavior | SQL |
+|---|---|---|
+| `save "data.csv", replace` | Write CSV to disk | `COPY (...) TO 'data.csv' (FORMAT CSV, HEADER)` |
+| `save "data.parquet", replace` | Write Parquet to disk | `COPY (...) TO 'data.parquet' (FORMAT PARQUET)` |
+| `save mytable, replace` | Create in-memory table | `CREATE OR REPLACE TABLE mytable AS (...)` |
+| `save "mytable", replace` | Same (quoted, no extension) | `CREATE OR REPLACE TABLE mytable AS (...)` |
+
+Detection rule: if the name contains `.csv`, `.parquet`, `.json`, or `.dta` → file. Otherwise → table. This feels natural to both audiences: Stata users write `save "file.dta"`, DuckDB users write `save mytable`.
+
+`save` remains a side-effect: the CTE chain continues unchanged after saving. You can keep transforming after a save.
 
 **`tempfile`:**
 - `tempfile name` → registers `name` as a tempfile identifier in state
-- `save "\`name'", replace` → detects tempfile target, executes `CREATE OR REPLACE TABLE _tempfiles.name AS (full CTE chain SELECT)`. This is a side-effect — the CTE chain continues unchanged after save.
-- `use "\`name'", clear` → detects tempfile source, resets chain with `_s0 AS (SELECT * FROM _tempfiles.name)`
-- Use a dedicated schema `_tempfiles` (created on first use via `CREATE SCHEMA IF NOT EXISTS _tempfiles`) to avoid clashing with user tables
-- State: `set<string> tempfile_names` to track which names are tempfiles
+- On save/use, tempfile names resolve to `_tempfiles.name` (a private schema)
+- `save "\`name'", replace` → `CREATE OR REPLACE TABLE _tempfiles.name AS (...)`
+- `use "\`name'", clear` → resets chain with `SELECT * FROM _tempfiles.name`
+- Schema `_tempfiles` created on first use via `CREATE SCHEMA IF NOT EXISTS _tempfiles`
+- State: `set<string> tempfile_names` to track registered tempfile names
 
 **`preserve`/`restore`:**
-- `preserve` → snapshot the current CTE chain state: save `step_counter` and `cte_steps.size()` as a checkpoint index into the state
-- `restore` → truncate `cte_steps` back to the checkpoint and reset `step_counter`, effectively rewinding to the preserve point
-- No tables created, no SQL executed — pure state manipulation
-- State: `int preserve_checkpoint = -1` (index into cte_steps, -1 = no active preserve)
-- Nested preserve not supported (Stata doesn't support it either)
+- `preserve` → save current `cte_steps.size()` and `step_counter` as a checkpoint
+- `restore` → truncate `cte_steps` back to checkpoint, reset `step_counter`
+- Pure state manipulation — no SQL, no tables, no disk
+- State: `int preserve_checkpoint = -1` (index into cte_steps)
+- Nested preserve not supported (same as Stata)
 
-**Commands:**
+**Commands classification:**
+- `save "file"` → side-effect (writes file/table, returns result of COPY/CREATE)
+- `save tablename` → side-effect (creates table, chain continues)
 - `tempfile` → transformation (registers name)
 - `preserve` → transformation (saves checkpoint)
 - `restore` → transformation (rewinds chain)
 
 **Test:**
-- tempfile from edgelist.do: `tempfile firms; save "\`firms'"; ... use "\`firms'"`
-- preserve/restore from manager-facts.do: `preserve; ...; save ...; restore`
+- `save mytable, replace; use mytable, clear` — roundtrip via table
+- `tempfile firms; save firms, replace; use firms, clear` — tempfile workflow
+- `preserve; drop name; list; restore; list` — preserve/restore checkpoint
 
 ### M16: `xtset` + lag/lead operators (`L.`, `F.`)
 - `xtset panelvar timevar` → store panel structure in state
