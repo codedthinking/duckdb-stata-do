@@ -358,20 +358,21 @@ Based on commands used in [korenmiklos/ceo-value](https://github.com/korenmiklos
 
 ### M15: `save` to tables, `tempfile`, `preserve`/`restore`
 
-**Enhanced `save` — file vs table detection:**
+**Enhanced `save` — explicit `table` option for in-memory tables:**
 
-`save` currently only writes to disk. We extend it to create in-memory DuckDB tables when no file extension is detected:
+`save` defaults to writing to disk (Stata behavior). The new `table` (or `memory`) option creates an in-memory DuckDB table instead:
 
 | Syntax | Behavior | SQL |
 |---|---|---|
 | `save "data.csv", replace` | Write CSV to disk | `COPY (...) TO 'data.csv' (FORMAT CSV, HEADER)` |
 | `save "data.parquet", replace` | Write Parquet to disk | `COPY (...) TO 'data.parquet' (FORMAT PARQUET)` |
-| `save mytable, replace` | Create in-memory table | `CREATE OR REPLACE TABLE mytable AS (...)` |
-| `save "mytable", replace` | Same (quoted, no extension) | `CREATE OR REPLACE TABLE mytable AS (...)` |
-
-Detection rule: if the name contains `.csv`, `.parquet`, `.json`, or `.dta` → file. Otherwise → table. This feels natural to both audiences: Stata users write `save "file.dta"`, DuckDB users write `save mytable`.
+| `save "data"` | Write to disk (no extension = no format hint) | `COPY (...) TO 'data'` |
+| `save mytable, replace table` | Create in-memory table | `CREATE OR REPLACE TABLE mytable AS (...)` |
+| `save mytable, replace memory` | Same (`memory` is alias for `table`) | `CREATE OR REPLACE TABLE mytable AS (...)` |
 
 `save` remains a side-effect: the CTE chain continues unchanged after saving. You can keep transforming after a save.
+
+Correspondingly, `use mytable, clear` loads from an in-memory table when no file extension is present (already works — `FileReadFunction` passes through bare names).
 
 **`tempfile`:**
 - `tempfile name` → registers `name` as a tempfile identifier in state
@@ -395,10 +396,17 @@ Detection rule: if the name contains `.csv`, `.parquet`, `.json`, or `.dta` → 
 - `preserve` → transformation (saves checkpoint)
 - `restore` → transformation (rewinds chain)
 
+**Garbage collection:**
+- State tracks all created tables: `vector<string> created_tables` (fully qualified names)
+- `clear` drops all tracked tables, the `_tempfiles` schema, and resets the CTE chain
+- `do "script.do"` completion drops tables created within that do-file scope (tempfiles die, explicit tables die unless saved to disk)
+- Disk files are never touched by garbage collection
+
 **Test:**
-- `save mytable, replace; use mytable, clear` — roundtrip via table
+- `save mytable, replace table; use mytable, clear` — roundtrip via table
 - `tempfile firms; save firms, replace; use firms, clear` — tempfile workflow
 - `preserve; drop name; list; restore; list` — preserve/restore checkpoint
+- `clear` after `save mytable, table` — table is dropped
 
 ### M16: `xtset` + lag/lead operators (`L.`, `F.`)
 - `xtset panelvar timevar` → store panel structure in state
