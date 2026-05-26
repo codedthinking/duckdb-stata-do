@@ -1,0 +1,215 @@
+# name: test/sql/stata_do.test
+# description: test stata_do extension
+# group: [sql]
+
+require stata_do
+
+# ============================================================
+# M0: Extension loads, standard SQL still works
+# ============================================================
+
+query I
+SELECT 1
+----
+1
+
+# ============================================================
+# M1: use, list, clear, count
+# ============================================================
+
+statement ok
+use "test/data/firms.csv", clear
+
+query IIRI
+list
+----
+1	Acme	1000	2017
+2	Beta	2000	2018
+3	Gamma	1500	2017
+4	Delta	3000	2018
+5	Epsilon	500	2018
+
+query I
+count
+----
+5
+
+statement ok
+clear
+
+# ============================================================
+# M2: keep, drop, rename
+# ============================================================
+
+statement ok
+use "test/data/firms.csv", clear
+
+# keep columns
+statement ok
+keep id name revenue year
+
+query I
+count
+----
+5
+
+# Now reload and test keep if
+statement ok
+use "test/data/firms.csv", clear
+
+statement ok
+keep if year == 2018
+
+query I
+count
+----
+3
+
+# Reload and test drop columns
+statement ok
+use "test/data/firms.csv", clear
+
+statement ok
+drop name
+
+query IRI
+list
+----
+1	1000	2017
+2	2000	2018
+3	1500	2017
+4	3000	2018
+5	500	2018
+
+# Reload and test drop if
+statement ok
+use "test/data/firms.csv", clear
+
+statement ok
+drop if year == 2017
+
+query I
+count
+----
+3
+
+# Test rename
+statement ok
+use "test/data/firms.csv", clear
+
+statement ok
+rename revenue sales
+
+query IIIR
+list
+----
+1	Acme	2017	1000
+2	Beta	2018	2000
+3	Gamma	2017	1500
+4	Delta	2018	3000
+5	Epsilon	2018	500
+
+# ============================================================
+# M3: generate, replace
+# ============================================================
+
+statement ok
+use "test/data/firms.csv", clear
+
+# generate new column
+statement ok
+generate ln_rev = log(revenue)
+
+query IIRIR
+list
+----
+1	Acme	1000	2017	6.907755278982137
+2	Beta	2000	2018	7.600902459542082
+3	Gamma	1500	2017	7.3132308093279215
+4	Delta	3000	2018	8.006367567650246
+5	Epsilon	500	2018	6.214608098422191
+
+# generate with if condition
+statement ok
+use "test/data/firms.csv", clear
+
+statement ok
+generate big = revenue > 1000 if year == 2018
+
+# replace
+statement ok
+use "test/data/firms.csv", clear
+
+statement ok
+replace revenue = revenue * 2
+
+query I
+list revenue
+----
+2000
+4000
+3000
+6000
+1000
+
+# replace with if
+statement ok
+use "test/data/firms.csv", clear
+
+statement ok
+replace revenue = 0 if year == 2017
+
+query I
+list revenue
+----
+0
+2000
+0
+3000
+500
+
+# ============================================================
+# Chained operations
+# ============================================================
+
+statement ok
+use "test/data/firms.csv", clear
+
+statement ok
+keep if year == 2018
+
+statement ok
+generate ln_rev = log(revenue)
+
+statement ok
+sort revenue
+
+query IIRIR
+list
+----
+5	Epsilon	500	2018	6.214608098422191
+2	Beta	2000	2018	7.600902459542082
+4	Delta	3000	2018	8.006367567650246
+
+# Terminal: head
+statement ok
+use "test/data/firms.csv", clear
+
+query IIRI
+head 2
+----
+1	Acme	1000	2017
+2	Beta	2000	2018
+
+# Terminal: tabulate
+statement ok
+use "test/data/firms.csv", clear
+
+query II
+tabulate year
+----
+2017	2
+2018	3
+
+statement ok
+clear
