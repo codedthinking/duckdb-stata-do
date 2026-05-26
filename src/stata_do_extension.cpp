@@ -329,6 +329,26 @@ static string ProcessCommand(const StataCommand &cmd, StataDoStateInfo &state) {
 		return "SELECT 'OK' AS status";
 	}
 
+	if (cmd.command == "order") {
+		// order var1 var2 — move listed columns to front, rest follow
+		// options: last, after(var), before(var), alphabetical
+		auto vars = StringUtil::Split(cmd.arguments, ' ');
+		if (vars.empty()) {
+			throw ParserException("'order' requires at least one variable name");
+		}
+		string col_list;
+		for (idx_t i = 0; i < vars.size(); i++) {
+			if (i > 0) {
+				col_list += ", ";
+			}
+			col_list += Trim(vars[i]);
+		}
+		// Put listed columns first, then all others with COLUMNS(*)
+		// DuckDB supports: SELECT col1, col2, * EXCLUDE (col1, col2) FROM t
+		state.AddStep("SELECT " + col_list + ", * EXCLUDE (" + col_list + ") FROM " + prev);
+		return "SELECT 'OK' AS status";
+	}
+
 	// --- Terminal commands ---
 	if (cmd.command == "list") {
 		string cols = "*";
@@ -364,8 +384,10 @@ static string ProcessCommand(const StataCommand &cmd, StataDoStateInfo &state) {
 
 	if (cmd.command == "tail") {
 		string n = cmd.arguments.empty() ? "5" : Trim(cmd.arguments);
-		return state.BuildQuery("SELECT * FROM (SELECT *, ROW_NUMBER() OVER () AS _rn, COUNT(*) OVER () AS _total FROM " +
-		                        prev + ") sub WHERE _rn > _total - " + n);
+		return state.BuildQuery(
+		    "SELECT * EXCLUDE (_rn, _total) FROM ("
+		    "SELECT *, ROW_NUMBER() OVER () AS _rn, COUNT(*) OVER () AS _total FROM " +
+		    prev + ") sub WHERE _rn > _total - " + n);
 	}
 
 	if (cmd.command == "describe") {
@@ -423,7 +445,7 @@ static string ProcessCommand(const StataCommand &cmd, StataDoStateInfo &state) {
 }
 
 //===--------------------------------------------------------------------===//
-// parse_function: detect Stata commands
+// parse_function: detect Stata commands (called when standard parser fails)
 //===--------------------------------------------------------------------===//
 static ParserExtensionParseResult stata_do_parse(ParserExtensionInfo *info, const string &query) {
 	string command;
@@ -432,6 +454,51 @@ static ParserExtensionParseResult stata_do_parse(ParserExtensionInfo *info, cons
 	}
 	auto parse_data = make_uniq<StataDoParseData>(query);
 	return ParserExtensionParseResult(std::move(parse_data));
+}
+
+//===--------------------------------------------------------------------===//
+// parser_override: handles commands that conflict with SQL keywords
+// (describe, summarize) — called BEFORE the standard parser
+//===--------------------------------------------------------------------===//
+static ParserOverrideResult stata_do_parser_override(ParserExtensionInfo *info, const string &query,
+                                                     ParserOptions &options) {
+	string trimmed = Trim(query);
+	if (!trimmed.empty() && trimmed.back() == ';') {
+		trimmed.pop_back();
+		trimmed = Trim(trimmed);
+	}
+	string lower = StringUtil::Lower(trimmed);
+
+	// Only intercept describe/summarize when we have data loaded
+	auto &state = dynamic_cast<StataDoStateInfo &>(*info);
+	if (!state.HasData()) {
+		return ParserOverrideResult();
+	}
+
+	bool is_ours = false;
+	if (StringUtil::StartsWith(lower, "describe") &&
+	    (lower.size() == 8 || lower[8] == ' ' || lower[8] == ';')) {
+		is_ours = true;
+	}
+	if (StringUtil::StartsWith(lower, "summarize") &&
+	    (lower.size() == 9 || lower[9] == ' ' || lower[9] == ';')) {
+		is_ours = true;
+	}
+
+	if (!is_ours) {
+		return ParserOverrideResult();
+	}
+
+	try {
+		auto cmd = TokenizeCommand(query);
+		string sql = ProcessCommand(cmd, state);
+
+		Parser parser;
+		parser.ParseQuery(sql);
+		return ParserOverrideResult(std::move(parser.statements));
+	} catch (std::exception &ex) {
+		return ParserOverrideResult(ex);
+	}
 }
 
 //===--------------------------------------------------------------------===//
@@ -496,12 +563,19 @@ static void LoadInternal(ExtensionLoader &loader) {
 	auto &instance = loader.GetDatabaseInstance();
 	auto &config = DBConfig::GetConfig(instance);
 
-	// Register parser extension
+	// Shared state for all parser paths
+	auto shared_state = make_shared_ptr<StataDoStateInfo>();
+
+	// Register parser extension (parse_function for most commands, parser_override for SQL-conflicting ones)
 	ParserExtension parser_ext;
 	parser_ext.parse_function = stata_do_parse;
 	parser_ext.plan_function = stata_do_plan;
-	parser_ext.parser_info = make_shared_ptr<StataDoStateInfo>();
+	parser_ext.parser_override = stata_do_parser_override;
+	parser_ext.parser_info = shared_state;
 	ParserExtension::Register(config, parser_ext);
+
+	// Enable parser override in fallback mode (override runs first, falls back to standard parser)
+	config.SetOptionByName("allow_parser_override_extension", Value("fallback"));
 
 	// Register operator extension for the bind redirect
 	auto operator_ext = make_shared_ptr<StataDoOperatorExtension>();

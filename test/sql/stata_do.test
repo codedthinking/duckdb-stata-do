@@ -191,7 +191,41 @@ list
 2	Beta	2000	2018	7.600902459542082
 4	Delta	3000	2018	8.006367567650246
 
-# Terminal: head
+# ============================================================
+# M4: sort, order, count, describe, head, tail, summarize
+# ============================================================
+
+# sort already tested above in chained operations
+
+# order: reorder columns
+statement ok
+use "test/data/firms.csv", clear
+
+statement ok
+order year name
+
+query IIRI
+list
+----
+2017	Acme	1	1000
+2018	Beta	2	2000
+2017	Gamma	3	1500
+2018	Delta	4	3000
+2018	Epsilon	5	500
+
+# describe
+statement ok
+use "test/data/firms.csv", clear
+
+query II
+describe
+----
+id	BIGINT
+name	VARCHAR
+revenue	BIGINT
+year	BIGINT
+
+# head
 statement ok
 use "test/data/firms.csv", clear
 
@@ -201,7 +235,35 @@ head 2
 1	Acme	1000	2017
 2	Beta	2000	2018
 
-# Terminal: tabulate
+# tail
+statement ok
+use "test/data/firms.csv", clear
+
+query IIRI
+tail 2
+----
+4	Delta	3000	2018
+5	Epsilon	500	2018
+
+# summarize
+statement ok
+use "test/data/firms.csv", clear
+
+query IRRIRRRI
+summarize revenue
+----
+5	1600.0	961.7692030835673	500	1000.0	1500.0	2000.0	3000
+
+# summarize with if
+statement ok
+summarize revenue if year == 2018
+
+query IRRIRRRI
+summarize revenue if year == 2018
+----
+3	1833.3333333333333	1258.3057763498999	500	1250.0	2000.0	2500.0	3000
+
+# tabulate
 statement ok
 use "test/data/firms.csv", clear
 
