@@ -64,6 +64,10 @@ struct StataDoStateInfo : public ParserExtensionInfo {
 	//! Tempfile tables created (for garbage collection on clear)
 	vector<string> tempfile_tables;
 
+	//! Panel structure (set by xtset/tsset)
+	string panel_var;  // empty if pure time-series
+	string time_var;   // empty if not set
+
 	//! Preserve checkpoint: index into cte_steps (-1 = no active preserve)
 	int preserve_checkpoint = -1;
 	int preserve_step_counter = -1;

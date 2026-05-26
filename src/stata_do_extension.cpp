@@ -30,7 +30,8 @@ static const vector<string> STATA_COMMANDS = {"use",       "list",       "clear"
                                               "tabulate",  "head",       "tail",    "save",    "append",
                                               "mvencode",  "reshape",    "do",      "label",   "codebook",
                                               "duplicates", "expand",    "export",  "import",
-                                              "merge",     "tempfile",  "preserve", "restore"};
+                                              "merge",     "tempfile",  "preserve", "restore",
+                                              "xtset",     "tsset"};
 
 // Command classification for do-file execution
 // Transformation: modifies the CTE chain state
@@ -40,7 +41,8 @@ static bool IsTransformationCommand(const string &command) {
 	static const vector<string> TRANSFORMATION = {"use", "clear", "do", "keep", "drop", "generate", "replace",
 	                                              "rename", "sort", "order", "egen", "collapse", "mvencode",
 	                                              "reshape", "append", "label", "duplicates", "expand", "import",
-	                                              "merge", "tempfile", "preserve", "restore"};
+	                                              "merge", "tempfile", "preserve", "restore",
+	                                              "xtset", "tsset"};
 	for (auto &cmd : TRANSFORMATION) {
 		if (command == cmd) {
 			return true;
@@ -248,10 +250,10 @@ static bool ParseFunctionCall(const string &expr, string &func_name, string &arg
 	return true;
 }
 
-// Check if expression contains _n or _N (which expand to window functions)
-static bool ExpressionUsesRowVars(const string &expr) {
-	std::regex row_var_re("\\b_[nN]\\b");
-	return std::regex_search(expr, row_var_re);
+// Check if expression contains _n, _N, L., F., or D. (which expand to window functions)
+static bool ExpressionUsesWindowFunctions(const string &expr) {
+	std::regex window_re("\\b(_[nN]\\b|[LFD]\\d*\\.)");
+	return std::regex_search(expr, window_re);
 }
 
 // Translate a cond(test, a, b) call to CASE WHEN test THEN a ELSE b END
@@ -359,8 +361,69 @@ static idx_t FindFunctionArgs(const string &s, idx_t open_paren, string &args_ou
 	return i;
 }
 
-static string TranslateExpression(const string &expr, const string &by_cols = "") {
+static string TranslateExpression(const string &expr, const string &by_cols = "",
+                                  const string &panel_var = "", const string &time_var = "") {
 	string result = expr;
+
+	// missing(x) -> (x IS NULL) — must be done BEFORE L./F./D. so that
+	// missing(L.var) becomes (L.var IS NULL), then L. is translated
+	std::regex missing_re("\\bmissing\\s*\\(([^)]+)\\)");
+	result = std::regex_replace(result, missing_re, "($1 IS NULL)");
+
+	// L., L2., F., F2., D. time-series operators (gap-aware)
+	if (!time_var.empty()) {
+		string partition = panel_var.empty() ? "" : "PARTITION BY " + panel_var + " ";
+		string order = "ORDER BY " + time_var;
+		string over = "OVER (" + partition + order + ")";
+
+		// D.var -> (var - L.var) — expand before L. translation
+		std::regex d_re("\\bD(\\d*)\\.(\\w+)");
+		std::smatch d_match;
+		string d_result = result;
+		while (std::regex_search(d_result, d_match, d_re)) {
+			string n_str = d_match[1].str();
+			int n = n_str.empty() ? 1 : std::stoi(n_str);
+			string var = d_match[2].str();
+			string replacement = "(" + var + " - L" + to_string(n) + "." + var + ")";
+			d_result = d_match.prefix().str() + replacement + d_match.suffix().str();
+		}
+		result = d_result;
+
+		// L.var, L2.var etc -> gap-aware LAG
+		// Pattern: L followed by optional digits, then . then word
+		std::regex l_re("\\bL(\\d*)\\.(\\w+)");
+		std::smatch l_match;
+		string l_result = result;
+		while (std::regex_search(l_result, l_match, l_re)) {
+			string n_str = l_match[1].str();
+			int n = n_str.empty() ? 1 : std::stoi(n_str);
+			string var = l_match[2].str();
+			// Gap-aware: check that time difference equals n
+			string lag_expr = "CASE WHEN (" + time_var + " - LAG(" + time_var + ", " +
+			                  to_string(n) + ") " + over + ") = " + to_string(n) +
+			                  " THEN LAG(" + var + ", " + to_string(n) + ") " + over +
+			                  " ELSE NULL END";
+			l_result = l_match.prefix().str() + lag_expr + l_match.suffix().str();
+		}
+		result = l_result;
+
+		// F.var, F2.var etc -> gap-aware LEAD
+		std::regex f_re("\\bF(\\d*)\\.(\\w+)");
+		std::smatch f_match;
+		string f_result = result;
+		while (std::regex_search(f_result, f_match, f_re)) {
+			string n_str = f_match[1].str();
+			int n = n_str.empty() ? 1 : std::stoi(n_str);
+			string var = f_match[2].str();
+			// Gap-aware: check that time difference equals n
+			string lead_expr = "CASE WHEN (LEAD(" + time_var + ", " + to_string(n) + ") " +
+			                   over + " - " + time_var + ") = " + to_string(n) +
+			                   " THEN LEAD(" + var + ", " + to_string(n) + ") " + over +
+			                   " ELSE NULL END";
+			f_result = f_match.prefix().str() + lead_expr + f_match.suffix().str();
+		}
+		result = f_result;
+	}
 
 	// cond(test, a, b) -> CASE WHEN test THEN a ELSE b END
 	// Must be done before simple regex replacements since args may contain commas
@@ -451,9 +514,7 @@ static string TranslateExpression(const string &expr, const string &by_cols = ""
 	// log() -> LN()
 	std::regex log_re("\\blog\\s*\\(");
 	result = std::regex_replace(result, log_re, "LN(");
-	// missing(x) -> (x IS NULL)
-	std::regex missing_re("\\bmissing\\s*\\(([^)]+)\\)");
-	result = std::regex_replace(result, missing_re, "($1 IS NULL)");
+	// missing() already handled above (before L./F./D.)
 	// substr(s, start, len) -> SUBSTRING(s, start, len)
 	std::regex substr_re("\\bsubstr\\s*\\(");
 	result = std::regex_replace(result, substr_re, "SUBSTRING(");
@@ -508,6 +569,11 @@ static string TranslateExpression(const string &expr, const string &by_cols = ""
 // Process command: update state, return SQL
 //===--------------------------------------------------------------------===//
 static string ProcessCommand(const StataCommand &cmd, StataDoStateInfo &state) {
+	// Helper: translate expression with panel/time context from state
+	auto TrExpr = [&state](const string &expr, const string &by_cols = "") {
+		return TranslateExpression(expr, by_cols, state.panel_var, state.time_var);
+	};
+
 	if (cmd.command == "use") {
 		state.Clear();
 		string source = ExtractQuotedString(cmd.arguments);
@@ -563,6 +629,24 @@ static string ProcessCommand(const StataCommand &cmd, StataDoStateInfo &state) {
 		state.step_counter = state.preserve_step_counter;
 		state.preserve_checkpoint = -1;
 		state.preserve_step_counter = -1;
+		return "SELECT 'OK' AS status";
+	}
+
+	if (cmd.command == "xtset" || cmd.command == "tsset") {
+		// xtset panelvar timevar  OR  tsset timevar  OR  tsset panelvar timevar
+		auto vars = StringUtil::Split(cmd.arguments, ' ');
+		if (vars.empty()) {
+			throw ParserException("'%s' requires at least a time variable", cmd.command);
+		}
+		if (vars.size() == 1) {
+			// tsset timevar (pure time-series, no panel var)
+			state.panel_var = "";
+			state.time_var = Trim(vars[0]);
+		} else {
+			// xtset panelvar timevar  OR  tsset panelvar timevar
+			state.panel_var = Trim(vars[0]);
+			state.time_var = Trim(vars[1]);
+		}
 		return "SELECT 'OK' AS status";
 	}
 
@@ -831,8 +915,8 @@ static string ProcessCommand(const StataCommand &cmd, StataDoStateInfo &state) {
 	// --- Transformation commands ---
 	if (cmd.command == "keep") {
 		if (cmd.arguments.empty() && !cmd.condition.empty()) {
-			string cond = TranslateExpression(cmd.condition);
-			if (ExpressionUsesRowVars(cmd.condition)) {
+			string cond = TrExpr(cmd.condition);
+			if (ExpressionUsesWindowFunctions(cmd.condition)) {
 				// Window functions can't be in WHERE — add intermediate step
 				state.AddStep("SELECT *, (" + cond + ") AS _keep_cond FROM " + prev);
 				prev = state.LatestStep();
@@ -861,7 +945,7 @@ static string ProcessCommand(const StataCommand &cmd, StataDoStateInfo &state) {
 				col_list += Trim(vars[i]);
 			}
 			state.AddStep("SELECT " + col_list + " FROM " + prev + " WHERE " +
-			              TranslateExpression(cmd.condition));
+			              TrExpr(cmd.condition));
 		} else {
 			throw ParserException("Invalid 'keep' syntax");
 		}
@@ -870,8 +954,8 @@ static string ProcessCommand(const StataCommand &cmd, StataDoStateInfo &state) {
 
 	if (cmd.command == "drop") {
 		if (cmd.arguments.empty() && !cmd.condition.empty()) {
-			string cond = TranslateExpression(cmd.condition);
-			if (ExpressionUsesRowVars(cmd.condition)) {
+			string cond = TrExpr(cmd.condition);
+			if (ExpressionUsesWindowFunctions(cmd.condition)) {
 				state.AddStep("SELECT *, (" + cond + ") AS _drop_cond FROM " + prev);
 				prev = state.LatestStep();
 				state.AddStep("SELECT * EXCLUDE (_drop_cond) FROM " + prev + " WHERE NOT _drop_cond");
@@ -912,10 +996,10 @@ static string ProcessCommand(const StataCommand &cmd, StataDoStateInfo &state) {
 		}
 		string var_name = Trim(cmd.arguments.substr(0, eq_pos));
 		string expr = Trim(cmd.arguments.substr(eq_pos + 1));
-		string sql_expr = TranslateExpression(expr);
+		string sql_expr = TrExpr(expr);
 
 		if (!cmd.condition.empty()) {
-			string sql_cond = TranslateExpression(cmd.condition);
+			string sql_cond = TrExpr(cmd.condition);
 			state.AddStep("SELECT *, CASE WHEN " + sql_cond + " THEN " + sql_expr + " ELSE NULL END AS " +
 			              var_name + " FROM " + prev);
 		} else {
@@ -931,10 +1015,10 @@ static string ProcessCommand(const StataCommand &cmd, StataDoStateInfo &state) {
 		}
 		string var_name = Trim(cmd.arguments.substr(0, eq_pos));
 		string expr = Trim(cmd.arguments.substr(eq_pos + 1));
-		string sql_expr = TranslateExpression(expr);
+		string sql_expr = TrExpr(expr);
 
 		if (!cmd.condition.empty()) {
-			string sql_cond = TranslateExpression(cmd.condition);
+			string sql_cond = TrExpr(cmd.condition);
 			state.AddStep("SELECT * REPLACE (CASE WHEN " + sql_cond + " THEN " + sql_expr + " ELSE " + var_name +
 			              " END AS " + var_name + ") FROM " + prev);
 		} else {
@@ -982,7 +1066,7 @@ static string ProcessCommand(const StataCommand &cmd, StataDoStateInfo &state) {
 		string window_expr = sql_func + "(" + func_arg + ") OVER (" + partition + ")";
 
 		if (!cmd.condition.empty()) {
-			string sql_cond = TranslateExpression(cmd.condition, by_cols);
+			string sql_cond = TrExpr(cmd.condition, by_cols);
 			state.AddStep("SELECT *, CASE WHEN " + sql_cond + " THEN " + window_expr +
 			              " ELSE NULL END AS " + var_name + " FROM " + prev);
 		} else {
@@ -1107,7 +1191,7 @@ static string ProcessCommand(const StataCommand &cmd, StataDoStateInfo &state) {
 
 		string sql = "SELECT " + select_exprs + " FROM " + prev;
 		if (!cmd.condition.empty()) {
-			sql += " WHERE " + TranslateExpression(cmd.condition, by_cols);
+			sql += " WHERE " + TrExpr(cmd.condition, by_cols);
 		}
 		if (!by_cols.empty()) {
 			sql += " GROUP BY " + by_cols;
@@ -1416,7 +1500,7 @@ static string ProcessCommand(const StataCommand &cmd, StataDoStateInfo &state) {
 		}
 		string sql = "SELECT " + cols + " FROM " + prev;
 		if (!cmd.condition.empty()) {
-			sql += " WHERE " + TranslateExpression(cmd.condition);
+			sql += " WHERE " + TrExpr(cmd.condition);
 		}
 		return state.BuildQuery(sql);
 	}
@@ -1424,7 +1508,7 @@ static string ProcessCommand(const StataCommand &cmd, StataDoStateInfo &state) {
 	if (cmd.command == "count") {
 		string sql = "SELECT COUNT(*) AS n FROM " + prev;
 		if (!cmd.condition.empty()) {
-			sql += " WHERE " + TranslateExpression(cmd.condition);
+			sql += " WHERE " + TrExpr(cmd.condition);
 		}
 		return state.BuildQuery(sql);
 	}
@@ -1496,7 +1580,7 @@ static string ProcessCommand(const StataCommand &cmd, StataDoStateInfo &state) {
 		string var = Trim(cmd.arguments);
 		string where_clause;
 		if (!cmd.condition.empty()) {
-			where_clause = " WHERE " + TranslateExpression(cmd.condition);
+			where_clause = " WHERE " + TrExpr(cmd.condition);
 		}
 		string sql = "SELECT "
 		             "COUNT(" + var + ") AS N, "
@@ -1525,7 +1609,7 @@ static string ProcessCommand(const StataCommand &cmd, StataDoStateInfo &state) {
 		}
 		string where_clause;
 		if (!cmd.condition.empty()) {
-			where_clause = " WHERE " + TranslateExpression(cmd.condition);
+			where_clause = " WHERE " + TrExpr(cmd.condition);
 		}
 		return state.BuildQuery("SELECT " + group_cols + ", COUNT(*) AS freq FROM " + prev + where_clause +
 		                        " GROUP BY " + group_cols + " ORDER BY " + group_cols);
