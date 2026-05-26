@@ -362,9 +362,9 @@ Stata uses `tempfile` as a workaround for its single-dataset model. In DuckDB we
 
 **`tempfile`:**
 - `tempfile name` → registers `name` as a tempfile identifier in state
-- `save "\`name'", replace` → detects tempfile target, executes `CREATE OR REPLACE TABLE _stata_temp.name AS (full CTE chain SELECT)`. This is a side-effect — the CTE chain continues unchanged after save.
-- `use "\`name'", clear` → detects tempfile source, resets chain with `_s0 AS (SELECT * FROM _stata_temp.name)`
-- Use a dedicated schema `_stata_temp` (created on first use via `CREATE SCHEMA IF NOT EXISTS _stata_temp`) to avoid clashing with user tables
+- `save "\`name'", replace` → detects tempfile target, executes `CREATE OR REPLACE TABLE _tempfiles.name AS (full CTE chain SELECT)`. This is a side-effect — the CTE chain continues unchanged after save.
+- `use "\`name'", clear` → detects tempfile source, resets chain with `_s0 AS (SELECT * FROM _tempfiles.name)`
+- Use a dedicated schema `_tempfiles` (created on first use via `CREATE SCHEMA IF NOT EXISTS _tempfiles`) to avoid clashing with user tables
 - State: `set<string> tempfile_names` to track which names are tempfiles
 
 **`preserve`/`restore`:**
