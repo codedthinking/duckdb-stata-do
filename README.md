@@ -96,6 +96,26 @@ list                        -->  WITH _s0 AS (...), _s1 AS (...), _s2 AS (...)
 
 DuckDB optimizes the full CTE chain at once. File formats are auto-detected: `.csv`, `.parquet`, `.json`, `.dta`.
 
+## Limitations
+
+### `.dta` file support
+
+Reading `.dta` files via `use "file.dta"` relies on the DuckDB community extension (`st_read()`), which is slow for large files. Writing `.dta` files is not supported.
+
+**Recommended workflow:** convert `.dta` files to Parquet beforehand using [stata2ducklake](https://github.com/codedthinking/stata2ducklake) or similar tools, then use Parquet in your scripts:
+
+```
+# Convert once (outside DuckDB)
+stata2ducklake input.dta --output data/
+
+# Use Parquet in your .do files
+use "data/input.parquet", clear
+```
+
+### SQL keyword conflicts
+
+`describe` and `summarize` conflict with DuckDB SQL keywords. Use `codebook` as an alias for `describe` that always works. When all statements are on one line (e.g., `use "file.csv"; describe;`), the extension intercepts them correctly.
+
 ## Building
 
 ```bash
