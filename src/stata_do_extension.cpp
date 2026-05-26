@@ -30,6 +30,22 @@ static const vector<string> STATA_COMMANDS = {"use",       "list",      "clear",
                                               "tabulate",  "head",      "tail",    "save",    "append",
                                               "mvencode",  "reshape",  "do"};
 
+// Command classification for do-file execution
+// Transformation: modifies the CTE chain state
+// Terminal: materializes the chain, returns the data frame
+// Side-effect: returns a derived result (count, stats, freq table, file write)
+static bool IsTransformationCommand(const string &command) {
+	static const vector<string> TRANSFORMATION = {"use", "clear", "do", "keep", "drop", "generate", "replace",
+	                                              "rename", "sort", "order", "egen", "collapse", "mvencode",
+	                                              "reshape", "append"};
+	for (auto &cmd : TRANSFORMATION) {
+		if (command == cmd) {
+			return true;
+		}
+	}
+	return false;
+}
+
 static bool IsStataCommand(const string &query, string &command_out) {
 	string trimmed = Trim(query);
 	if (!trimmed.empty() && trimmed.back() == ';') {
@@ -350,11 +366,17 @@ static string ProcessCommand(const StataCommand &cmd, StataDoStateInfo &state) {
 			// Check if this is a Stata command we know
 			string sub_command;
 			if (!IsStataCommand(trimmed, sub_command)) {
-				// Not a Stata command — skip (could be a Stata command we don't support)
+				// Not a Stata command — skip
 				continue;
 			}
 
-			// Process the line as a Stata command
+			// In do-file execution, only run transformation commands
+			// Terminal (list, head, tail, describe) and side-effect (count, summarize,
+			// tabulate, save) commands are skipped — user runs them interactively after
+			if (!IsTransformationCommand(sub_command)) {
+				continue;
+			}
+
 			auto sub_cmd = TokenizeCommand(trimmed);
 			ProcessCommand(sub_cmd, state);
 		}
