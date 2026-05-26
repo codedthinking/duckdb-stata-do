@@ -589,15 +589,44 @@ static string ProcessCommand(const StataCommand &cmd, StataDoStateInfo &state) {
 				continue;
 			}
 
-			// Find the next assignment: y = x or y = func(x)
+			// Find the next assignment: y = x, y = func(x), or just varname (shorthand)
 			idx_t eq_pos = remaining.find('=');
-			if (eq_pos == string::npos) {
-				break;
+			// Check if there's a ( before the = — if so, the = might be inside func(x)
+			idx_t first_paren = remaining.find('(');
+			// Also check: no = at all, or = comes after a ( — means it's a bare variable name
+			bool has_assignment = (eq_pos != string::npos &&
+			                      (first_paren == string::npos || eq_pos < first_paren));
+
+			if (!has_assignment) {
+				// No assignment: "collapse (mean) var1 var2" — apply current_func to each var
+				// Parse space-separated variable names until next ( or end
+				while (!remaining.empty() && remaining[0] != '(') {
+					idx_t sp = remaining.find(' ');
+					string var;
+					if (sp != string::npos) {
+						var = Trim(remaining.substr(0, sp));
+						remaining = Trim(remaining.substr(sp + 1));
+					} else {
+						var = Trim(remaining);
+						remaining = "";
+					}
+					if (var.empty()) {
+						continue;
+					}
+					string sql_func = TranslateAggFunction(current_func);
+					if (!first_expr) {
+						select_exprs += ", ";
+					}
+					select_exprs += sql_func + "(" + var + ") AS " + var;
+					first_expr = false;
+				}
+				continue;
 			}
+
 			string var_name = Trim(remaining.substr(0, eq_pos));
 			remaining = Trim(remaining.substr(eq_pos + 1));
 
-			// Get the source expression (until next space-letter or end)
+			// Get the source expression
 			string source_expr;
 			string func_name_used, func_arg_used;
 

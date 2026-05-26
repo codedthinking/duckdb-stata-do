@@ -359,6 +359,31 @@ list
 ----
 1600.0	5
 
+# collapse shorthand: bare variable names without = assignment
+statement ok
+use "test/data/firms.csv", clear
+
+statement ok
+collapse (mean) revenue, by(year)
+
+statement ok
+sort year
+
+query IR
+list
+----
+2017	1250.0
+2018	1833.3333333333333
+
+# collapse then collapse again (chained)
+statement ok
+collapse (mean) revenue
+
+query R
+list
+----
+1541.6666666666665
+
 # collapse with func(x) syntax
 statement ok
 use "test/data/firms.csv", clear
