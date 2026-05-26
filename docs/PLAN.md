@@ -357,13 +357,31 @@ Based on commands used in [korenmiklos/ceo-value](https://github.com/korenmiklos
 - **Test:** local macros from balance.do, foreach from balance.do
 
 ### M15: `tempfile`, `preserve`/`restore`
-- `preserve` → push current CTE chain + labels onto a stack in state
-- `restore` → pop the stack, restoring previous chain + labels
-- `tempfile name` → register a named temporary storage slot
-- `save "\`name'", replace` → store current chain in the temp slot (as a CTE snapshot)
-- `use "\`name'", clear` → restore chain from the temp slot
-- State changes: add `vector<ChainSnapshot> preserve_stack` and `map<string, ChainSnapshot> tempfiles` to `StataDoStateInfo`
-- **Test:** preserve/restore from manager-facts.do, tempfile from edgelist.do
+
+Stata uses `tempfile` as a workaround for its single-dataset model. In DuckDB we can do better: tempfiles become real tables in a private schema, and preserve/restore becomes a checkpoint in the CTE chain.
+
+**`tempfile`:**
+- `tempfile name` → registers `name` as a tempfile identifier in state
+- `save "\`name'", replace` → detects tempfile target, executes `CREATE OR REPLACE TABLE _stata_temp.name AS (full CTE chain SELECT)`. This is a side-effect — the CTE chain continues unchanged after save.
+- `use "\`name'", clear` → detects tempfile source, resets chain with `_s0 AS (SELECT * FROM _stata_temp.name)`
+- Use a dedicated schema `_stata_temp` (created on first use via `CREATE SCHEMA IF NOT EXISTS _stata_temp`) to avoid clashing with user tables
+- State: `set<string> tempfile_names` to track which names are tempfiles
+
+**`preserve`/`restore`:**
+- `preserve` → snapshot the current CTE chain state: save `step_counter` and `cte_steps.size()` as a checkpoint index into the state
+- `restore` → truncate `cte_steps` back to the checkpoint and reset `step_counter`, effectively rewinding to the preserve point
+- No tables created, no SQL executed — pure state manipulation
+- State: `int preserve_checkpoint = -1` (index into cte_steps, -1 = no active preserve)
+- Nested preserve not supported (Stata doesn't support it either)
+
+**Commands:**
+- `tempfile` → transformation (registers name)
+- `preserve` → transformation (saves checkpoint)
+- `restore` → transformation (rewinds chain)
+
+**Test:**
+- tempfile from edgelist.do: `tempfile firms; save "\`firms'"; ... use "\`firms'"`
+- preserve/restore from manager-facts.do: `preserve; ...; save ...; restore`
 
 ### M16: `xtset` + lag/lead operators (`L.`, `F.`)
 - `xtset panelvar timevar` → store panel structure in state
