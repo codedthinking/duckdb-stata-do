@@ -31,7 +31,7 @@ static const vector<string> STATA_COMMANDS = {"use",       "list",       "clear"
                                               "mvencode",  "reshape",    "do",      "label",   "codebook",
                                               "duplicates", "expand",    "export",  "import",
                                               "merge",     "tempfile",  "preserve", "restore",
-                                              "xtset",     "tsset"};
+                                              "xtset",     "tsset",    "bysort",  "by"};
 
 // Command classification for do-file execution
 // Transformation: modifies the CTE chain state
@@ -42,7 +42,7 @@ static bool IsTransformationCommand(const string &command) {
 	                                              "rename", "sort", "order", "egen", "collapse", "mvencode",
 	                                              "reshape", "append", "label", "duplicates", "expand", "import",
 	                                              "merge", "tempfile", "preserve", "restore",
-	                                              "xtset", "tsset"};
+	                                              "xtset", "tsset", "bysort", "by"};
 	for (auto &cmd : TRANSFORMATION) {
 		if (command == cmd) {
 			return true;
@@ -74,6 +74,9 @@ struct StataCommand {
 	string arguments;
 	string condition;
 	string options;
+	// bysort context (set when command has bysort/by prefix)
+	string bysort_partition;  // PARTITION BY vars (comma-separated)
+	string bysort_order;      // ORDER BY vars (comma-separated), empty if none
 };
 
 static StataCommand TokenizeCommand(const string &query) {
@@ -362,7 +365,8 @@ static idx_t FindFunctionArgs(const string &s, idx_t open_paren, string &args_ou
 }
 
 static string TranslateExpression(const string &expr, const string &by_cols = "",
-                                  const string &panel_var = "", const string &time_var = "") {
+                                  const string &panel_var = "", const string &time_var = "",
+                                  const string &bysort_order = "") {
 	string result = expr;
 
 	// missing(x) -> (x IS NULL) — must be done BEFORE L./F./D. so that
@@ -555,13 +559,70 @@ static string TranslateExpression(const string &expr, const string &by_cols = ""
 		result = out;
 	}
 
-	// _n -> ROW_NUMBER() OVER (...)
+	// Build partition clause for _n, _N, [_n-1], running aggregates
 	string partition = by_cols.empty() ? "" : "PARTITION BY " + by_cols + " ";
+	string order_clause = bysort_order.empty() ? "" : "ORDER BY " + bysort_order + " ";
+
+	// var[_n-1] → LAG(var, 1) OVER (...) — MUST be before _n expansion
+	// var[_n+1] → LEAD(var, 1) OVER (...)
+	{
+		std::regex subscript_re("(\\w+)\\[_n\\s*([+-])\\s*(\\d+)\\]");
+		std::smatch m;
+		string sr = result;
+		string out;
+		while (std::regex_search(sr, m, subscript_re)) {
+			out += m.prefix().str();
+			string var = m[1].str();
+			string sign = m[2].str();
+			int offset = std::stoi(m[3].str());
+			string func = (sign == "-") ? "LAG" : "LEAD";
+			out += func + "(" + var + ", " + to_string(offset) + ") OVER (" + partition + order_clause + ")";
+			sr = m.suffix().str();
+		}
+		out += sr;
+		result = out;
+	}
+
+	// _n -> ROW_NUMBER() OVER (PARTITION BY ... ORDER BY ...)
 	std::regex n_re("\\b_n\\b");
-	result = std::regex_replace(result, n_re, "ROW_NUMBER() OVER (" + partition + ")");
-	// _N -> COUNT(*) OVER (...)
+	result = std::regex_replace(result, n_re, "ROW_NUMBER() OVER (" + partition + order_clause + ")");
+	// _N -> COUNT(*) OVER (PARTITION BY ...)
 	std::regex N_re("\\b_N\\b");
 	result = std::regex_replace(result, N_re, "COUNT(*) OVER (" + partition + ")");
+
+	// Running aggregate functions in bysort context:
+	// sum(x) with by_cols → SUM(x) OVER (PARTITION BY ... ORDER BY ... ROWS UNBOUNDED PRECEDING)
+	// This only triggers when partition context exists (from bysort)
+	// Note: for egen, the OVER() is added separately; this handles generate's running sums
+	if (!partition.empty()) {
+		// Detect aggregate functions that should become running windows
+		// sum() in generate context = running sum (cumulative)
+		static const vector<pair<string, string>> running_aggs = {
+		    {"sum", "SUM"}, {"mean", "AVG"}, {"count", "COUNT"}, {"min", "MIN"}, {"max", "MAX"}
+		};
+		for (auto &[stata_fn, sql_fn] : running_aggs) {
+			string search = stata_fn + "(";
+			idx_t pos = 0;
+			while ((pos = result.find(search, pos)) != string::npos) {
+				// Check word boundary
+				if (pos > 0 && (isalnum(result[pos - 1]) || result[pos - 1] == '_')) {
+					pos++;
+					continue;
+				}
+				// Find matching close paren
+				string args;
+				idx_t end = FindFunctionArgs(result, pos + stata_fn.size(), args);
+				if (end == string::npos) {
+					pos++;
+					continue;
+				}
+				string replacement = sql_fn + "(" + args + ") OVER (" + partition + order_clause + "ROWS UNBOUNDED PRECEDING)";
+				result = result.substr(0, pos) + replacement + result.substr(end);
+				pos += replacement.size();
+			}
+		}
+	}
+
 	return result;
 }
 
@@ -569,10 +630,80 @@ static string TranslateExpression(const string &expr, const string &by_cols = ""
 // Process command: update state, return SQL
 //===--------------------------------------------------------------------===//
 static string ProcessCommand(const StataCommand &cmd, StataDoStateInfo &state) {
-	// Helper: translate expression with panel/time context from state
-	auto TrExpr = [&state](const string &expr, const string &by_cols = "") {
-		return TranslateExpression(expr, by_cols, state.panel_var, state.time_var);
+	// Helper: translate expression with panel/time and bysort context
+	auto TrExpr = [&state, &cmd](const string &expr, const string &by_cols = "") {
+		// bysort context overrides by_cols for _n, _N, [_n-1] etc.
+		string effective_by = by_cols;
+		if (!cmd.bysort_partition.empty() && effective_by.empty()) {
+			effective_by = cmd.bysort_partition;
+		}
+		return TranslateExpression(expr, effective_by, state.panel_var, state.time_var, cmd.bysort_order);
 	};
+
+	if (cmd.command == "bysort" || cmd.command == "by") {
+		// bysort group_vars (sort_vars): command ...
+		// by group_vars: command ...
+		// Parse the prefix, extract inner command, process it with bysort context
+		string rest = cmd.arguments;
+		if (!cmd.condition.empty()) {
+			rest += " if " + cmd.condition;
+		}
+		if (!cmd.options.empty()) {
+			rest += ", " + cmd.options;
+		}
+
+		// Find the colon separator
+		idx_t colon_pos = rest.find(':');
+		if (colon_pos == string::npos) {
+			throw ParserException("'bysort'/'by' requires a colon: bysort vars: command");
+		}
+		string prefix_part = Trim(rest.substr(0, colon_pos));
+		string inner_cmd_str = Trim(rest.substr(colon_pos + 1));
+
+		// Parse group_vars and optional (sort_vars) from prefix
+		string group_vars_str, sort_vars_str;
+		idx_t paren_pos = prefix_part.find('(');
+		if (paren_pos != string::npos) {
+			group_vars_str = Trim(prefix_part.substr(0, paren_pos));
+			idx_t close = prefix_part.find(')', paren_pos);
+			if (close != string::npos) {
+				sort_vars_str = Trim(prefix_part.substr(paren_pos + 1, close - paren_pos - 1));
+			}
+		} else {
+			group_vars_str = prefix_part;
+		}
+
+		// Convert space-separated to comma-separated
+		auto gvars = StringUtil::Split(group_vars_str, ' ');
+		string partition_cols;
+		for (idx_t i = 0; i < gvars.size(); i++) {
+			if (i > 0) {
+				partition_cols += ", ";
+			}
+			partition_cols += Trim(gvars[i]);
+		}
+		string order_cols;
+		if (!sort_vars_str.empty()) {
+			auto svars = StringUtil::Split(sort_vars_str, ' ');
+			for (idx_t i = 0; i < svars.size(); i++) {
+				if (i > 0) {
+					order_cols += ", ";
+				}
+				order_cols += Trim(svars[i]);
+			}
+		}
+
+		// Tokenize and process the inner command with bysort context
+		auto inner_cmd = TokenizeCommand(inner_cmd_str);
+		inner_cmd.bysort_partition = partition_cols;
+		inner_cmd.bysort_order = order_cols;
+
+		// For generate with bysort: if the expression uses aggregate functions
+		// like sum(), they become running aggregates with ORDER BY
+		// The bysort context is passed through to TrExpr via the cmd struct
+
+		return ProcessCommand(inner_cmd, state);
+	}
 
 	if (cmd.command == "use") {
 		state.Clear();
