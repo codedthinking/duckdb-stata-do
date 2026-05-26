@@ -236,6 +236,72 @@ DuckDB requires `;` to terminate statements, but Stata uses newlines. Register a
 - This may require a separate C++ stats library or duckdb-stats extension
 - **Decision point:** may defer or implement basic OLS only
 
+### M9.5: Labels and `describe` (DuckLake-compatible metadata)
+
+Stata has rich column metadata: variable labels (describing what a column is) and value labels (mapping integers to human-readable strings). The [stata2ducklake](https://github.com/codedthinking/stata2ducklake) project established conventions for storing this metadata in DuckLake:
+
+- **Variable labels** → `COMMENT ON COLUMN table.col IS 'label'`
+- **Value labels** → `value_label_<name>` lookup tables with `(value INTEGER, label VARCHAR)`
+- **Column↔label mapping** → `_column_value_labels(table_name, column_name, label_name)`
+- **Macros** → `labels(tbl)` shows all metadata, `decode(lbl, val)` resolves a value label
+
+**Commands to implement:**
+
+1. **`label variable varname "label text"`**
+   - Store in per-connection state: `StataDoStateInfo.variable_labels[varname] = label`
+   - When `save` is called to a DuckLake catalog, emit `COMMENT ON COLUMN`
+   - In the CTE chain: labels are metadata-only, no SQL step needed
+   - Returns `SELECT 'OK'`
+
+2. **`label define labelname value1 "text1" value2 "text2" ...`**
+   - Store in state: `StataDoStateInfo.value_label_defs[labelname] = {val: text, ...}`
+   - These define the mapping but don't attach it to a column yet
+
+3. **`label values varname labelname`**
+   - Store in state: `StataDoStateInfo.column_labels[varname] = labelname`
+   - Attaches a value label definition to a specific column
+
+4. **`describe` (enhanced)**
+   - Current: shows `column_name, column_type`
+   - Enhanced: also shows variable label and value label name from state
+   - SQL: join column metadata with in-memory label state
+   - Since labels live in state (not in the CTE chain), `describe` builds the output by:
+     a. Getting column names/types from the CTE chain via `DESCRIBE`
+     b. Left-joining with the in-memory variable_labels and column_labels maps
+     c. Returning `column_name, column_type, variable_label, value_label`
+
+5. **`decode varname`** (bonus, Stata-like)
+   - If varname has an attached value label, replace integer values with label text
+   - SQL: join with the value label definition
+   - `generate decoded_var = decode(labelname, varname)` or automatic via the lookup
+
+**State changes to `StataDoStateInfo`:**
+```cpp
+struct StataDoStateInfo : public ParserExtensionInfo {
+    // ... existing CTE chain fields ...
+
+    // Variable labels: column_name -> label text
+    unordered_map<string, string> variable_labels;
+    // Value label definitions: label_name -> {value -> text}
+    unordered_map<string, unordered_map<int, string>> value_label_defs;
+    // Column-to-value-label mapping: column_name -> label_name
+    unordered_map<string, string> column_labels;
+};
+```
+
+**DuckLake integration on `save`:**
+When saving to a DuckLake-attached catalog (not a plain file), emit:
+- `COMMENT ON COLUMN` for each variable label
+- `CREATE TABLE value_label_<name>` for each value label definition
+- `INSERT INTO _column_value_labels` for each column↔label mapping
+
+**Test plan:**
+- `label variable revenue "Annual revenue in USD"`
+- `label define yesno 0 "No" 1 "Yes"`
+- `label values employed yesno`
+- `describe` shows labels
+- Round-trip: save to DuckLake, reload, labels preserved
+
 ### M10: Polish & Community Extension Submission
 - Write `description.yml` for community extensions repo
 - README with examples
