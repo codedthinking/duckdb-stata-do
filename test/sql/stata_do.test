@@ -661,3 +661,98 @@ year	BIGINT
 
 statement ok
 clear
+
+# ============================================================
+# M11: Expression functions
+# ============================================================
+
+statement ok
+use "test/data/firms.csv", clear
+
+# cond()
+statement ok
+generate big = cond(revenue > 1500, 1, 0)
+
+query II
+list id big
+----
+1	0
+2	1
+3	0
+4	1
+5	0
+
+# inrange()
+statement ok
+use "test/data/firms.csv", clear
+
+statement ok
+keep if inrange(revenue, 1000, 2000)
+
+query I
+count
+----
+3
+
+# inlist()
+statement ok
+use "test/data/firms.csv", clear
+
+statement ok
+keep if inlist(name, "Acme", "Delta")
+
+query I
+count
+----
+2
+
+# substr()
+statement ok
+use "test/data/firms.csv", clear
+
+statement ok
+generate short = substr(name, 1, 3)
+
+query II
+list name short
+----
+Acme	Acm
+Beta	Bet
+Gamma	Gam
+Delta	Del
+Epsilon	Eps
+
+# real() and int()
+statement ok
+use "test/data/firms.csv", clear
+
+statement ok
+generate rev_int = int(revenue / 3)
+
+query II
+list id rev_int
+----
+1	333
+2	667
+3	500
+4	1000
+5	167
+
+# collapse with firstnm
+statement ok
+use "test/data/firms.csv", clear
+
+statement ok
+collapse (firstnm) name (mean) revenue, by(year)
+
+statement ok
+sort year
+
+query IIR
+list
+----
+2017	Acme	1250.0
+2018	Beta	1833.3333333333333
+
+statement ok
+clear

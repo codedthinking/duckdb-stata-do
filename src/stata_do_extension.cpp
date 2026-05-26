@@ -225,8 +225,8 @@ static string TranslateAggFunction(const string &func_name) {
 	if (lower == "min") return "MIN";
 	if (lower == "max") return "MAX";
 	if (lower == "median") return "MEDIAN";
-	if (lower == "first") return "FIRST";
-	if (lower == "last") return "LAST";
+	if (lower == "first" || lower == "firstnm") return "FIRST";
+	if (lower == "last" || lower == "lastnm") return "LAST";
 	return func_name;  // pass through unknown functions
 }
 
@@ -251,14 +251,246 @@ static bool ExpressionUsesRowVars(const string &expr) {
 	return std::regex_search(expr, row_var_re);
 }
 
+// Translate a cond(test, a, b) call to CASE WHEN test THEN a ELSE b END
+// Handles nested parentheses in arguments
+static string TranslateCond(const string &args) {
+	// Split on commas, respecting parentheses
+	int depth = 0;
+	vector<string> parts;
+	string current;
+	for (idx_t i = 0; i < args.size(); i++) {
+		char c = args[i];
+		if (c == '(') {
+			depth++;
+		} else if (c == ')') {
+			depth--;
+		} else if (c == ',' && depth == 0) {
+			parts.push_back(Trim(current));
+			current.clear();
+			continue;
+		}
+		current += c;
+	}
+	parts.push_back(Trim(current));
+	if (parts.size() != 3) {
+		throw ParserException("cond() requires exactly 3 arguments: cond(test, true_val, false_val)");
+	}
+	return "CASE WHEN " + parts[0] + " THEN " + parts[1] + " ELSE " + parts[2] + " END";
+}
+
+// Translate inrange(x, lo, hi) to (x BETWEEN lo AND hi)
+static string TranslateInrange(const string &args) {
+	int depth = 0;
+	vector<string> parts;
+	string current;
+	for (idx_t i = 0; i < args.size(); i++) {
+		char c = args[i];
+		if (c == '(') {
+			depth++;
+		} else if (c == ')') {
+			depth--;
+		} else if (c == ',' && depth == 0) {
+			parts.push_back(Trim(current));
+			current.clear();
+			continue;
+		}
+		current += c;
+	}
+	parts.push_back(Trim(current));
+	if (parts.size() != 3) {
+		throw ParserException("inrange() requires exactly 3 arguments: inrange(x, lo, hi)");
+	}
+	return "(" + parts[0] + " BETWEEN " + parts[1] + " AND " + parts[2] + ")";
+}
+
+// Translate inlist(x, a, b, c, ...) to (x IN (a, b, c, ...))
+static string TranslateInlist(const string &args) {
+	int depth = 0;
+	vector<string> parts;
+	string current;
+	for (idx_t i = 0; i < args.size(); i++) {
+		char c = args[i];
+		if (c == '(') {
+			depth++;
+		} else if (c == ')') {
+			depth--;
+		} else if (c == ',' && depth == 0) {
+			parts.push_back(Trim(current));
+			current.clear();
+			continue;
+		}
+		current += c;
+	}
+	parts.push_back(Trim(current));
+	if (parts.size() < 2) {
+		throw ParserException("inlist() requires at least 2 arguments: inlist(x, val1, ...)");
+	}
+	string x = parts[0];
+	string vals;
+	for (idx_t i = 1; i < parts.size(); i++) {
+		if (i > 1) {
+			vals += ", ";
+		}
+		vals += parts[i];
+	}
+	return "(" + x + " IN (" + vals + "))";
+}
+
+// Extract the arguments of a function call: find matching parens for func_name(...)
+// Returns the position after the closing paren, or string::npos if not found
+static idx_t FindFunctionArgs(const string &s, idx_t open_paren, string &args_out) {
+	int depth = 1;
+	idx_t i = open_paren + 1;
+	while (i < s.size() && depth > 0) {
+		if (s[i] == '(') {
+			depth++;
+		} else if (s[i] == ')') {
+			depth--;
+		}
+		i++;
+	}
+	if (depth != 0) {
+		return string::npos;
+	}
+	args_out = s.substr(open_paren + 1, i - open_paren - 2);
+	return i;
+}
+
 static string TranslateExpression(const string &expr, const string &by_cols = "") {
 	string result = expr;
+
+	// cond(test, a, b) -> CASE WHEN test THEN a ELSE b END
+	// Must be done before simple regex replacements since args may contain commas
+	{
+		string out;
+		idx_t pos = 0;
+		while (pos < result.size()) {
+			// Look for "cond("
+			idx_t found = result.find("cond(", pos);
+			if (found == string::npos || (found > 0 && (isalnum(result[found - 1]) || result[found - 1] == '_'))) {
+				if (found == string::npos) {
+					out += result.substr(pos);
+					break;
+				}
+				out += result.substr(pos, found + 1 - pos);
+				pos = found + 1;
+				continue;
+			}
+			out += result.substr(pos, found - pos);
+			string args;
+			idx_t end = FindFunctionArgs(result, found + 4, args);
+			if (end == string::npos) {
+				out += result.substr(found);
+				break;
+			}
+			out += TranslateCond(args);
+			pos = end;
+		}
+		result = out;
+	}
+
+	// inrange(x, lo, hi) -> (x BETWEEN lo AND hi)
+	{
+		string out;
+		idx_t pos = 0;
+		while (pos < result.size()) {
+			idx_t found = result.find("inrange(", pos);
+			if (found == string::npos || (found > 0 && (isalnum(result[found - 1]) || result[found - 1] == '_'))) {
+				if (found == string::npos) {
+					out += result.substr(pos);
+					break;
+				}
+				out += result.substr(pos, found + 1 - pos);
+				pos = found + 1;
+				continue;
+			}
+			out += result.substr(pos, found - pos);
+			string args;
+			idx_t end = FindFunctionArgs(result, found + 7, args);
+			if (end == string::npos) {
+				out += result.substr(found);
+				break;
+			}
+			out += TranslateInrange(args);
+			pos = end;
+		}
+		result = out;
+	}
+
+	// inlist(x, a, b, ...) -> (x IN (a, b, ...))
+	{
+		string out;
+		idx_t pos = 0;
+		while (pos < result.size()) {
+			idx_t found = result.find("inlist(", pos);
+			if (found == string::npos || (found > 0 && (isalnum(result[found - 1]) || result[found - 1] == '_'))) {
+				if (found == string::npos) {
+					out += result.substr(pos);
+					break;
+				}
+				out += result.substr(pos, found + 1 - pos);
+				pos = found + 1;
+				continue;
+			}
+			out += result.substr(pos, found - pos);
+			string args;
+			idx_t end = FindFunctionArgs(result, found + 6, args);
+			if (end == string::npos) {
+				out += result.substr(found);
+				break;
+			}
+			out += TranslateInlist(args);
+			pos = end;
+		}
+		result = out;
+	}
+
 	// log() -> LN()
 	std::regex log_re("\\blog\\s*\\(");
 	result = std::regex_replace(result, log_re, "LN(");
 	// missing(x) -> (x IS NULL)
 	std::regex missing_re("\\bmissing\\s*\\(([^)]+)\\)");
 	result = std::regex_replace(result, missing_re, "($1 IS NULL)");
+	// substr(s, start, len) -> SUBSTRING(s, start, len)
+	std::regex substr_re("\\bsubstr\\s*\\(");
+	result = std::regex_replace(result, substr_re, "SUBSTRING(");
+	// strlen(s) -> LENGTH(s)
+	std::regex strlen_re("\\bstrlen\\s*\\(");
+	result = std::regex_replace(result, strlen_re, "LENGTH(");
+	// strlower(s) -> LOWER(s)
+	std::regex strlower_re("\\bstrlower\\s*\\(");
+	result = std::regex_replace(result, strlower_re, "LOWER(");
+	// strupper(s) -> UPPER(s)
+	std::regex strupper_re("\\bstrupper\\s*\\(");
+	result = std::regex_replace(result, strupper_re, "UPPER(");
+	// strtrim(s) -> TRIM(s)
+	std::regex strtrim_re("\\bstrtrim\\s*\\(");
+	result = std::regex_replace(result, strtrim_re, "TRIM(");
+	// real(s) -> CAST(s AS DOUBLE)
+	std::regex real_re("\\breal\\s*\\(([^)]+)\\)");
+	result = std::regex_replace(result, real_re, "CAST($1 AS DOUBLE)");
+	// int(x) -> CAST(x AS INTEGER)
+	std::regex int_re("\\bint\\s*\\(([^)]+)\\)");
+	result = std::regex_replace(result, int_re, "CAST($1 AS INTEGER)");
+	// round(x) and round(x, d) — DuckDB supports ROUND natively, pass through
+	// abs(x) — DuckDB supports ABS natively, pass through
+
+	// Convert double-quoted strings to single-quoted (Stata uses " for strings, SQL uses ')
+	// But be careful not to convert column name references — only convert within expressions
+	{
+		string out;
+		bool in_dquote = false;
+		for (idx_t i = 0; i < result.size(); i++) {
+			if (result[i] == '"') {
+				out += '\'';
+				in_dquote = !in_dquote;
+			} else {
+				out += result[i];
+			}
+		}
+		result = out;
+	}
+
 	// _n -> ROW_NUMBER() OVER (...)
 	string partition = by_cols.empty() ? "" : "PARTITION BY " + by_cols + " ";
 	std::regex n_re("\\b_n\\b");
