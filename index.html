@@ -1987,7 +1987,32 @@ _sN <span class="tok-kw">AS</span> (
         </div>
 
         <h1 class="doc-h1">Install <span class="mono">dodoc</span></h1>
-        <p class="doc-lede">Download a pre-built binary for your platform, or build from source.</p>
+        <p class="doc-lede">One command to install. Choose your preferred method.</p>
+
+        <h2 id="dci-curl">install script (macOS / Linux)</h2>
+        <p>The fastest way — detects your platform and downloads the right binary:</p>
+
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">bash</span>
+            <span class="codeblock__title">// one-liner install</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-prompt">›</span> curl -fsSL https://getdodo.dev/install.sh | sh</code></pre>
+        </div>
+
+        <p>Installs to <code>/usr/local/bin</code> (or <code>~/.local/bin</code> if no sudo). Works on macOS (arm64 &amp; x86_64) and Linux (x86_64 &amp; arm64).</p>
+
+        <h2 id="dci-brew">homebrew (macOS / Linux)</h2>
+
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">bash</span>
+            <span class="codeblock__title">// via homebrew</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-prompt">›</span> brew install codedthinking/tap/dodoc</code></pre>
+        </div>
 
         <h2 id="dci-download">download pre-built binaries</h2>
         <p>Pre-built binaries are available on the <a href="https://github.com/codedthinking/dodo/releases" target="_blank" rel="noopener" style="color:var(--accent-deep);font-weight:600;">GitHub Releases</a> page for three platforms:</p>
