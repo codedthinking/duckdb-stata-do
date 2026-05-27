@@ -1,0 +1,2065 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>dodo docs — run .do files in DuckDB</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<link rel="icon" href="assets/favicon.svg"/>
+<link rel="stylesheet" href="styles/tokens.css"/>
+<style>
+/* ===========================================================
+   docs site — layout
+   =========================================================== */
+html, body { margin: 0; padding: 0; }
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg1);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+a { color: inherit; }
+::selection { background: var(--accent); color: var(--ink-900); }
+
+/* tighter scrollbar in scrollable panes */
+.scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.scroll::-webkit-scrollbar-thumb { background: var(--line-soft); border-radius: 999px; }
+.scroll::-webkit-scrollbar-thumb:hover { background: var(--line); }
+.scroll { scrollbar-color: var(--line-soft) transparent; scrollbar-width: thin; }
+
+/* ===========================================================
+   top bar
+   =========================================================== */
+.topbar {
+  position: sticky; top: 0; z-index: 50;
+  height: 60px;
+  background: var(--bg);
+  border-bottom: var(--bw-2) solid var(--line);
+  display: grid;
+  grid-template-columns: 280px 1fr auto;
+  align-items: center;
+  padding: 0;
+}
+.brand {
+  display: flex; align-items: center; gap: 10px;
+  padding-left: 24px; padding-right: 16px;
+  border-right: var(--bw-1) solid var(--line-soft);
+  height: 100%;
+  text-decoration: none; color: var(--fg1);
+}
+.brand__mark { width: 32px; height: 32px; display: block; }
+.brand__name {
+  font-family: var(--font-display); font-weight: 800;
+  letter-spacing: -0.06em; text-transform: lowercase;
+  font-size: 22px; color: var(--fg1);
+}
+.brand__slash {
+  font-family: var(--font-mono); font-size: 16px;
+  color: var(--fg3); margin: 0 4px;
+}
+.brand__docs {
+  font-family: var(--font-mono); font-size: 13px;
+  color: var(--fg2); font-weight: 500;
+}
+.brand__version {
+  margin-left: auto;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+  background: var(--accent-soft);
+  border: var(--bw-1) solid var(--line-soft);
+  border-radius: var(--r-pill);
+  color: var(--accent-deep);
+}
+
+.topbar__mid {
+  display: flex; align-items: center; gap: 16px;
+  padding: 0 24px;
+  height: 100%;
+}
+.search {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; max-width: 480px;
+  height: 36px; padding: 0 12px;
+  background: var(--bg-elevated);
+  border: var(--bw-1) solid var(--line-soft);
+  border-radius: var(--r-md);
+  color: var(--fg3);
+  font-family: var(--font-sans); font-size: 14px;
+  cursor: text;
+}
+.search:hover { border-color: var(--line); }
+.search__icon { width: 14px; height: 14px; flex: 0 0 14px; }
+.search__placeholder { flex: 1; }
+.search__kbd {
+  display: inline-flex; align-items: center; gap: 2px;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--fg3);
+  padding: 1px 6px;
+  border: var(--bw-1) solid var(--line-soft);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+}
+
+.topbar__right {
+  display: flex; align-items: center; gap: 4px;
+  padding-right: 16px;
+  height: 100%;
+}
+.toplink {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 36px; padding: 0 12px;
+  font-family: var(--font-sans); font-size: 14px;
+  font-weight: 500;
+  color: var(--fg2);
+  text-decoration: none;
+  border-radius: var(--r-md);
+  border: var(--bw-1) solid transparent;
+}
+.toplink:hover { background: var(--accent-soft); color: var(--fg1); border-color: var(--line-soft); }
+.toplink svg { width: 16px; height: 16px; }
+.iconbtn {
+  width: 36px; height: 36px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: var(--bw-1) solid transparent;
+  border-radius: var(--r-md);
+  color: var(--fg2);
+  cursor: pointer;
+}
+.iconbtn:hover { background: var(--accent-soft); color: var(--fg1); border-color: var(--line-soft); }
+.iconbtn svg { width: 16px; height: 16px; }
+
+/* ===========================================================
+   shell layout
+   =========================================================== */
+.shell {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr) 240px;
+  max-width: 1440px;
+  margin: 0 auto;
+}
+
+/* ===========================================================
+   sidebar
+   =========================================================== */
+.sidebar {
+  position: sticky; top: 60px;
+  height: calc(100vh - 60px);
+  overflow-y: auto;
+  padding: 28px 0 60px 0;
+  border-right: var(--bw-1) solid var(--line-soft);
+}
+.sidebar__group {
+  padding: 0 16px 4px 24px;
+}
+.sidebar__h {
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent-deep);
+  padding: 14px 0 8px;
+  display: flex; align-items: center; gap: 8px;
+}
+.sidebar__h::before {
+  content: ""; width: 6px; height: 6px;
+  background: var(--accent);
+  border: var(--bw-1) solid var(--line);
+}
+.sidebar details { margin: 0; }
+.sidebar details > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: space-between;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg2);
+  padding: 8px 10px 8px 10px;
+  border-radius: var(--r-sm);
+  user-select: none;
+}
+.sidebar details > summary::-webkit-details-marker { display: none; }
+.sidebar details > summary:hover { background: var(--accent-soft); color: var(--fg1); }
+.sidebar details > summary .chev {
+  width: 14px; height: 14px;
+  color: var(--fg3);
+  transition: transform var(--dur-fast) var(--ease-standard);
+}
+.sidebar details[open] > summary .chev { transform: rotate(90deg); }
+.sidebar details[open] > summary { color: var(--fg1); }
+
+.sidebar__list {
+  list-style: none; margin: 0; padding: 2px 0 6px 8px;
+  border-left: var(--bw-1) solid var(--line-soft);
+  margin-left: 14px;
+}
+.sidebar__list a {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg2);
+  text-decoration: none;
+  border-radius: var(--r-sm);
+  margin-left: -1px;
+  border-left: var(--bw-2) solid transparent;
+}
+.sidebar__list a:hover { background: var(--accent-soft); color: var(--fg1); }
+.sidebar__list a.is-active {
+  color: var(--ink-900);
+  background: var(--accent);
+  border-left-color: var(--ink-900);
+  font-weight: 700;
+}
+:root[data-theme="dark"] .sidebar__list a.is-active {
+  color: var(--ink-900);
+}
+.sidebar__list a .badge {
+  margin-left: auto;
+  font-size: 10px; font-weight: 600;
+  padding: 1px 5px;
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  border: var(--bw-1) solid var(--line-soft);
+  color: var(--fg3);
+}
+.sidebar__list a.is-active .badge { background: var(--ink-900); color: var(--ochre-200); border-color: var(--ink-900); }
+
+.sidebar__direct {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg2);
+  text-decoration: none;
+  border-radius: var(--r-sm);
+}
+.sidebar__direct:hover { background: var(--accent-soft); color: var(--fg1); }
+.sidebar__direct.is-active {
+  color: var(--ink-900);
+  background: var(--accent);
+}
+
+/* ===========================================================
+   main content
+   =========================================================== */
+.main {
+  padding: 48px 56px 120px;
+  min-width: 0;
+}
+.crumbs {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--fg3);
+  display: flex; align-items: center; gap: 6px;
+  margin-bottom: 16px;
+  text-transform: lowercase;
+}
+.crumbs a { text-decoration: none; color: var(--fg3); }
+.crumbs a:hover { color: var(--fg1); }
+.crumbs .sep { color: var(--fg-muted); }
+.crumbs .cur { color: var(--fg1); }
+
+h1.doc-h1 {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: var(--t-48);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+  color: var(--fg1);
+  margin: 0 0 12px 0;
+  text-wrap: balance;
+}
+h1.doc-h1 .mono {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.85em;
+  color: var(--accent-deep);
+  background: var(--accent-soft);
+  border: var(--bw-1) solid var(--line-soft);
+  padding: 2px 14px;
+  border-radius: var(--r-md);
+  margin-right: 12px;
+  vertical-align: middle;
+}
+.doc-lede {
+  font-family: var(--font-sans);
+  font-size: var(--t-20);
+  line-height: var(--leading-snug);
+  color: var(--fg2);
+  margin: 0 0 32px 0;
+  max-width: 680px;
+  text-wrap: pretty;
+}
+.doc h2 {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: var(--t-24);
+  line-height: var(--leading-snug);
+  letter-spacing: var(--tracking-snug);
+  color: var(--fg1);
+  margin: 56px 0 14px 0;
+  padding-top: 8px;
+  display: flex; align-items: center; gap: 12px;
+  scroll-margin-top: 80px;
+}
+.doc h2::before {
+  content: "";
+  width: 10px; height: 10px;
+  background: var(--accent);
+  border: var(--bw-2) solid var(--line);
+  display: inline-block;
+  flex: 0 0 10px;
+}
+.doc h3 {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: var(--t-18);
+  color: var(--fg1);
+  margin: 32px 0 10px 0;
+  scroll-margin-top: 80px;
+}
+.doc p {
+  font-family: var(--font-sans);
+  font-size: var(--t-16);
+  line-height: var(--leading-normal);
+  color: var(--fg2);
+  margin: 0 0 14px 0;
+  max-width: 680px;
+  text-wrap: pretty;
+}
+.doc ul, .doc ol {
+  margin: 0 0 14px 0;
+  padding-left: 22px;
+  max-width: 680px;
+}
+.doc li {
+  font-family: var(--font-sans);
+  font-size: var(--t-16);
+  line-height: var(--leading-normal);
+  color: var(--fg2);
+  margin: 4px 0;
+}
+.doc li::marker { color: var(--accent-deep); }
+.doc strong { color: var(--fg1); font-weight: 600; }
+
+/* inline code */
+.doc :is(p, li, h2, h3, td, th) code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  padding: 1px 6px;
+  background: var(--accent-soft);
+  border: var(--bw-hair) solid var(--line-soft);
+  border-radius: var(--r-sm);
+  color: var(--accent-deep);
+}
+:root[data-theme="dark"] .doc :is(p, li, h2, h3, td, th) code {
+  background: rgba(216,164,76,0.14);
+  color: var(--ochre-300);
+  border-color: rgba(243,231,201,0.14);
+}
+
+/* ===========================================================
+   code blocks
+   =========================================================== */
+.codeblock {
+  background: var(--term-bg);
+  border: var(--bw-2) solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-2);
+  margin: 16px 0 22px 0;
+  overflow: hidden;
+}
+.codeblock__head {
+  display: flex; align-items: center;
+  padding: 8px 12px 8px 14px;
+  background: var(--term-bg-2);
+  border-bottom: var(--bw-1) solid rgba(243,231,201,0.10);
+  gap: 8px;
+}
+.codeblock__lang {
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ochre-300);
+}
+.codeblock__title {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--term-comment);
+}
+.codeblock__copy {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--term-comment);
+  padding: 3px 8px;
+  border: var(--bw-1) solid rgba(243,231,201,0.18);
+  border-radius: var(--r-sm);
+  background: transparent;
+  cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.codeblock__copy:hover { color: var(--ochre-200); border-color: rgba(243,231,201,0.4); }
+.codeblock__copy svg { width: 11px; height: 11px; }
+
+.codeblock pre {
+  margin: 0;
+  padding: 16px 18px;
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--term-fg);
+  overflow-x: auto;
+  tab-size: 2;
+}
+.codeblock pre code { background: none; padding: 0; border: 0; color: inherit; font: inherit; }
+
+/* syntax tokens */
+.tok-kw { color: var(--term-kw); font-weight: 700; }
+.tok-cmd { color: var(--ochre-400); font-weight: 600; }
+.tok-str { color: var(--term-str); }
+.tok-num { color: var(--term-num); }
+.tok-com { color: var(--term-comment); font-style: italic; }
+.tok-fn  { color: #C9A66B; }
+.tok-prompt { color: var(--term-prompt); font-weight: 700; }
+.tok-op { color: var(--ochre-300); }
+
+/* small inline-ish output block (terminal style, no chrome) */
+.outputblock {
+  background: var(--term-bg);
+  border: var(--bw-2) solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-2);
+  margin: 8px 0 24px 0;
+  padding: 14px 18px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--term-fg);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* ===========================================================
+   callouts
+   =========================================================== */
+.callout {
+  margin: 22px 0;
+  padding: 16px 18px 14px 18px;
+  background: var(--bg-elevated);
+  border: var(--bw-2) solid var(--line);
+  border-left: 8px solid var(--accent);
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-2);
+  max-width: 680px;
+}
+.callout__h {
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--accent-deep);
+  margin: 0 0 6px 0;
+  display: flex; align-items: center; gap: 8px;
+}
+.callout p { margin: 0; color: var(--fg2); font-size: 15px; }
+.callout p + p { margin-top: 8px; }
+.callout--warn { border-left-color: var(--warning); }
+.callout--warn .callout__h { color: var(--warning); }
+.callout--danger { border-left-color: var(--danger); }
+.callout--danger .callout__h { color: var(--danger); }
+
+/* ===========================================================
+   tables
+   =========================================================== */
+.doc table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  max-width: 760px;
+  margin: 14px 0 24px 0;
+  background: var(--bg-elevated);
+  border: var(--bw-2) solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-2);
+  overflow: hidden;
+}
+.doc th {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--accent-deep);
+  text-align: left;
+  padding: 12px 16px;
+  background: var(--accent-soft);
+  border-bottom: var(--bw-2) solid var(--line);
+}
+.doc td {
+  padding: 10px 16px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  color: var(--fg2);
+  border-bottom: var(--bw-1) solid var(--line-soft);
+  vertical-align: top;
+}
+.doc tr:last-child td { border-bottom: 0; }
+.doc td code, .doc th code {
+  font-size: 13px;
+}
+
+/* ===========================================================
+   syntax box (command grammar)
+   =========================================================== */
+.syntax {
+  margin: 8px 0 20px;
+  padding: 14px 18px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.55;
+  background: var(--bg-elevated);
+  border: var(--bw-2) solid var(--line);
+  border-left: 8px solid var(--ink-900);
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-2);
+  color: var(--fg1);
+  max-width: 680px;
+}
+:root[data-theme="dark"] .syntax { border-left-color: var(--ochre-500); }
+.syntax .opt { color: var(--fg3); }
+.syntax .req { color: var(--accent-deep); font-weight: 600; }
+:root[data-theme="dark"] .syntax .req { color: var(--ochre-300); }
+.syntax .cmd { color: var(--ink-900); font-weight: 700; }
+:root[data-theme="dark"] .syntax .cmd { color: var(--ochre-200); }
+
+/* ===========================================================
+   page footer (within main)
+   =========================================================== */
+.pagefoot {
+  margin-top: 80px;
+  padding-top: 24px;
+  border-top: var(--bw-1) solid var(--line-soft);
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  max-width: 760px;
+}
+.pagefoot__nav {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 14px 18px;
+  border: var(--bw-2) solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-elevated);
+  box-shadow: var(--sh-1);
+  min-width: 200px;
+  text-decoration: none;
+  color: var(--fg1);
+  transition: transform var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
+}
+.pagefoot__nav:hover { transform: translate(-1px,-1px); box-shadow: var(--sh-3); }
+.pagefoot__nav .dir {
+  font-family: var(--font-mono); font-size: 11px;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--fg3);
+}
+.pagefoot__nav .ttl {
+  font-family: var(--font-mono); font-size: 14px; font-weight: 600;
+  color: var(--fg1);
+}
+.pagefoot__nav.next { text-align: right; margin-left: auto; }
+
+/* meta block under page footer */
+.pageedit {
+  margin-top: 20px;
+  display: flex; align-items: center; gap: 14px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--fg3);
+  max-width: 760px;
+}
+.pageedit a { color: var(--accent-deep); text-decoration: none; font-weight: 600; }
+.pageedit a:hover { text-decoration: underline; }
+
+/* ===========================================================
+   right TOC
+   =========================================================== */
+.toc {
+  position: sticky; top: 60px;
+  height: calc(100vh - 60px);
+  overflow-y: auto;
+  padding: 48px 20px 60px 20px;
+  font-family: var(--font-sans);
+}
+.toc__h {
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent-deep);
+  margin-bottom: 12px;
+  display: flex; align-items: center; gap: 8px;
+}
+.toc__h::before {
+  content: ""; width: 6px; height: 6px;
+  background: var(--accent);
+  border: var(--bw-1) solid var(--line);
+}
+.toc ul { list-style: none; margin: 0; padding: 0; }
+.toc li { margin: 0; }
+.toc a {
+  display: block;
+  padding: 5px 10px;
+  font-size: 13px;
+  color: var(--fg3);
+  text-decoration: none;
+  border-left: var(--bw-2) solid var(--line-soft);
+  margin-left: 0;
+}
+.toc a:hover { color: var(--fg1); border-left-color: var(--line); }
+.toc a.is-active { color: var(--accent-deep); border-left-color: var(--accent); font-weight: 600; }
+:root[data-theme="dark"] .toc a.is-active { color: var(--ochre-300); }
+.toc a.lvl-3 { padding-left: 20px; font-size: 12.5px; }
+
+.toc__feedback {
+  margin-top: 28px;
+  padding-top: 18px;
+  border-top: var(--bw-1) solid var(--line-soft);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  color: var(--fg3);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.toc__feedback a {
+  color: var(--accent-deep); text-decoration: none; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.toc__feedback a:hover { text-decoration: underline; }
+.toc__feedback svg { width: 12px; height: 12px; }
+
+/* ===========================================================
+   pages — show/hide
+   =========================================================== */
+.page { display: none; }
+.page.is-active { display: block; }
+
+/* prompt char styling for the brief tagline */
+.prompt {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-weight: 800;
+}
+
+/* tiny hero panel on landing/getting-started */
+.hero-panel {
+  margin: -8px 0 36px 0;
+  padding: 28px 32px;
+  background: var(--accent);
+  color: var(--ink-900);
+  border: var(--bw-2) solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-3);
+  max-width: 760px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 24px;
+  align-items: center;
+}
+.hero-panel__eye {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-900);
+  opacity: 0.8;
+}
+.hero-panel__ttl {
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.06em;
+  font-size: 44px;
+  margin: 4px 0 8px 0;
+  color: var(--ink-900);
+  text-transform: lowercase;
+}
+.hero-panel__sub {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--ink-900);
+}
+.hero-panel__art {
+  width: 90px; height: 90px;
+  display: block;
+}
+
+/* command-grid (used on getting-started) */
+.cmd-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+  margin: 18px 0 30px 0;
+  max-width: 760px;
+}
+.cmd-card {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 16px 18px;
+  background: var(--bg-elevated);
+  border: var(--bw-2) solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-1);
+  text-decoration: none;
+  transition: transform var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
+}
+.cmd-card:hover { transform: translate(-1px,-1px); box-shadow: var(--sh-2); }
+.cmd-card__name {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--accent-deep);
+}
+:root[data-theme="dark"] .cmd-card__name { color: var(--ochre-300); }
+.cmd-card__desc {
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  color: var(--fg2);
+  line-height: 1.45;
+}
+
+/* responsive */
+@media (max-width: 1180px) {
+  .shell { grid-template-columns: 260px minmax(0,1fr); }
+  .toc { display: none; }
+}
+@media (max-width: 860px) {
+  .shell { grid-template-columns: 1fr; }
+  .sidebar { display: none; }
+  .topbar { grid-template-columns: auto 1fr auto; }
+  .brand { border-right: 0; }
+  .main { padding: 32px 22px 80px; }
+}
+</style>
+</head>
+<body data-screen-label="dodo docs">
+<div class="app">
+
+  <!-- ===================== topbar ===================== -->
+  <header class="topbar">
+    <a class="brand" href="#getting-started">
+      <img class="brand__mark" src="assets/logo-mark.svg" alt="dodo"/>
+      <span class="brand__name">dodo</span>
+      <span class="brand__slash">/</span>
+      <span class="brand__docs">docs</span>
+      <span class="brand__version">v0.1.1</span>
+    </a>
+
+    <div class="topbar__mid">
+      <div class="search" role="search">
+        <svg class="search__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        <span class="search__placeholder">search the docs · try "collapse" or "L.x"</span>
+        <span class="search__kbd">⌘K</span>
+      </div>
+    </div>
+
+    <div class="topbar__right">
+      <a class="toplink" href="#" onclick="return false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+        changelog
+      </a>
+      <a class="toplink" href="https://github.com/codedthinking/dodo" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.57.1.78-.25.78-.55v-2.02c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.2 1.77 1.2 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.2-3.09-.12-.29-.52-1.46.11-3.05 0 0 .98-.31 3.2 1.18a11.06 11.06 0 0 1 5.82 0c2.22-1.49 3.2-1.18 3.2-1.18.63 1.59.23 2.76.11 3.05.75.81 1.2 1.83 1.2 3.09 0 4.42-2.7 5.4-5.27 5.68.41.36.78 1.05.78 2.12v3.14c0 .31.21.66.79.55A11.5 11.5 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></svg>
+        github
+        <span style="font-family:var(--font-mono);font-size:11px;color:var(--fg3);font-weight:500;">·&nbsp;★</span>
+      </a>
+      <span style="width:1.5px;height:24px;background:var(--line-soft);margin:0 6px;"></span>
+      <button class="iconbtn" id="theme-toggle" aria-label="toggle theme" title="toggle theme">
+        <svg id="theme-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <svg id="theme-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="shell">
+
+    <!-- ===================== sidebar ===================== -->
+    <aside class="sidebar scroll" id="sidebar">
+
+      <div class="sidebar__group">
+        <div class="sidebar__h">start here</div>
+        <a class="sidebar__direct" href="#getting-started" data-page="getting-started">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          getting started
+        </a>
+        <a class="sidebar__direct" href="#install" data-page="install">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          installation
+        </a>
+        <a class="sidebar__direct" href="#how-it-works" data-page="how-it-works">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+          how it works
+        </a>
+      </div>
+
+      <div class="sidebar__group">
+        <div class="sidebar__h">command reference</div>
+
+        <details open>
+          <summary>
+            <span>data i/o</span>
+            <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="m9 6 6 6-6 6"/></svg>
+          </summary>
+          <ul class="sidebar__list">
+            <li><a href="#use" data-page="use">use<span class="badge">io</span></a></li>
+            <li><a href="#save" data-page="save">save</a></li>
+            <li><a href="#append" data-page="append">append</a></li>
+            <li><a href="#import-delimited" data-page="import-delimited">import delimited</a></li>
+            <li><a href="#export-delimited" data-page="export-delimited">export delimited</a></li>
+            <li><a href="#do" data-page="do">do</a></li>
+            <li><a href="#clear" data-page="clear">clear</a></li>
+          </ul>
+        </details>
+
+        <details open>
+          <summary>
+            <span>transform</span>
+            <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="m9 6 6 6-6 6"/></svg>
+          </summary>
+          <ul class="sidebar__list">
+            <li><a href="#keep" data-page="keep">keep</a></li>
+            <li><a href="#drop" data-page="drop">drop</a></li>
+            <li><a href="#generate" data-page="generate">generate<span class="badge">core</span></a></li>
+            <li><a href="#replace" data-page="replace">replace</a></li>
+            <li><a href="#rename" data-page="rename">rename</a></li>
+            <li><a href="#sort" data-page="sort">sort</a></li>
+            <li><a href="#order" data-page="order">order</a></li>
+            <li><a href="#egen" data-page="egen">egen</a></li>
+            <li><a href="#collapse" data-page="collapse">collapse<span class="badge">core</span></a></li>
+            <li><a href="#mvencode" data-page="mvencode">mvencode</a></li>
+            <li><a href="#reshape" data-page="reshape">reshape</a></li>
+            <li><a href="#merge" data-page="merge">merge</a></li>
+            <li><a href="#duplicates" data-page="duplicates">duplicates drop</a></li>
+            <li><a href="#expand" data-page="expand">expand</a></li>
+          </ul>
+        </details>
+
+        <details>
+          <summary>
+            <span>inspect</span>
+            <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="m9 6 6 6-6 6"/></svg>
+          </summary>
+          <ul class="sidebar__list">
+            <li><a href="#" onclick="return false">list</a></li>
+            <li><a href="#" onclick="return false">count</a></li>
+            <li><a href="#" onclick="return false">head / tail</a></li>
+            <li><a href="#" onclick="return false">describe</a></li>
+            <li><a href="#" onclick="return false">summarize</a></li>
+            <li><a href="#" onclick="return false">tabulate</a></li>
+            <li><a href="#" onclick="return false">history</a></li>
+          </ul>
+        </details>
+
+        <details>
+          <summary>
+            <span>state management</span>
+            <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="m9 6 6 6-6 6"/></svg>
+          </summary>
+          <ul class="sidebar__list">
+            <li><a href="#" onclick="return false">undo / redo</a></li>
+            <li><a href="#" onclick="return false">preserve / restore</a></li>
+            <li><a href="#" onclick="return false">tempfile</a></li>
+            <li><a href="#" onclick="return false">xtset / tsset</a></li>
+            <li><a href="#" onclick="return false">label</a></li>
+          </ul>
+        </details>
+
+        <details>
+          <summary>
+            <span>control</span>
+            <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="m9 6 6 6-6 6"/></svg>
+          </summary>
+          <ul class="sidebar__list">
+            <li><a href="#" onclick="return false">bysort / by</a></li>
+          </ul>
+        </details>
+      </div>
+
+      <div class="sidebar__group">
+        <div class="sidebar__h">guides</div>
+        <a class="sidebar__direct" href="#expressions" data-page="expressions">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+          expression translation
+        </a>
+        <a class="sidebar__direct" href="#" onclick="return false">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+          running .do files
+        </a>
+        <a class="sidebar__direct" href="#" onclick="return false">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="3" y="3" width="18" height="18" rx="0"/><path d="M9 9h6v6H9z"/></svg>
+          duckdb ui integration
+        </a>
+        <a class="sidebar__direct" href="#" onclick="return false">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M3 12h6l3 8 3-16 3 8h3"/></svg>
+          migrating from stata
+        </a>
+        <a class="sidebar__direct" href="#" onclick="return false">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>
+          known limitations
+        </a>
+      </div>
+
+    </aside>
+
+    <!-- ===================== main ===================== -->
+    <main class="main doc">
+
+      <!-- ---------- page: getting-started ---------- -->
+      <article class="page is-active" id="page-getting-started" data-screen-label="getting started">
+        <div class="crumbs">
+          <a href="#getting-started">docs</a>
+          <span class="sep">/</span>
+          <span class="cur">getting started</span>
+        </div>
+
+        <div class="hero-panel">
+          <div>
+            <div class="hero-panel__eye">old scripts. new pond.</div>
+            <div class="hero-panel__ttl">getting started</div>
+            <div class="hero-panel__sub">install dodo. load the extension. run your <code style="font:inherit;background:rgba(26,26,26,0.10);padding:1px 6px;border-radius:4px;">.do</code> file.</div>
+          </div>
+          <img class="hero-panel__art" src="assets/logo-mark.svg" alt=""/>
+        </div>
+
+        <p class="doc-lede">
+          dodo is a DuckDB extension that reads legacy <code>.do</code> workflows and executes them on DuckDB, preserving familiar data-cleaning scripts while moving execution to a modern analytical engine.
+        </p>
+
+        <h2 id="gs-install">install in 30 seconds</h2>
+        <p>From any DuckDB shell — desktop, CLI, Python, R — the install procedure is the same. dodo is distributed through the DuckDB community extension repository.</p>
+
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">sql</span>
+            <span class="codeblock__title">// in any duckdb session</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-kw">INSTALL</span> dodo <span class="tok-kw">FROM</span> community;
+<span class="tok-kw">LOAD</span> dodo;</code></pre>
+        </div>
+
+        <h2 id="gs-tour">a 60-second tour</h2>
+        <p>The example below loads a CSV, filters rows, computes a column, aggregates by group, and prints the result — all in <code>.do</code> syntax. No <code>SELECT</code>, no <code>FROM</code>, no joins.</p>
+
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">.do</span>
+            <span class="codeblock__title">analysis/firms.do</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-cmd">use</span> <span class="tok-str">"firms.csv"</span>, <span class="tok-kw">clear</span>;
+<span class="tok-cmd">keep</span> <span class="tok-kw">if</span> year <span class="tok-op">&gt;=</span> <span class="tok-num">2020</span>;
+<span class="tok-cmd">generate</span> profit <span class="tok-op">=</span> revenue <span class="tok-op">-</span> cost;
+<span class="tok-cmd">collapse</span> (mean) avg_profit <span class="tok-op">=</span> profit, by(sector);
+<span class="tok-cmd">list</span>;</code></pre>
+        </div>
+
+        <p>Run the same script as a single command from the shell:</p>
+
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">sql</span>
+            <span class="codeblock__title">// run the .do file end-to-end</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-cmd">do</span> <span class="tok-str">"analysis/firms.do"</span>;
+<span class="tok-cmd">list</span>;</code></pre>
+        </div>
+
+        <div class="outputblock"><span class="tok-prompt">›</span> <span class="tok-com">// output</span>
+<span class="tok-com">┌────────────┬──────────────┐</span>
+<span class="tok-com">│</span> sector     <span class="tok-com">│</span> avg_profit   <span class="tok-com">│</span>
+<span class="tok-com">├────────────┼──────────────┤</span>
+<span class="tok-com">│</span> finance    <span class="tok-com">│</span> <span class="tok-num">  4,182.40</span> <span class="tok-com">│</span>
+<span class="tok-com">│</span> mfg        <span class="tok-com">│</span> <span class="tok-num">  1,704.22</span> <span class="tok-com">│</span>
+<span class="tok-com">│</span> retail     <span class="tok-com">│</span> <span class="tok-num">    902.81</span> <span class="tok-com">│</span>
+<span class="tok-com">│</span> services   <span class="tok-com">│</span> <span class="tok-num">  2,318.55</span> <span class="tok-com">│</span>
+<span class="tok-com">└────────────┴──────────────┘</span>
+<span class="tok-com">4 rows · ran in 38ms · cte chain: _s0 → _s1 → _s2 → _s3</span></div>
+
+        <h2 id="gs-jump">jump to a command</h2>
+        <p>The reference is grouped by what the command does. The four you'll touch every day:</p>
+
+        <div class="cmd-grid">
+          <a class="cmd-card" href="#use" data-page="use">
+            <div class="cmd-card__name">use</div>
+            <div class="cmd-card__desc">Load a file or table into the current dataset.</div>
+          </a>
+          <a class="cmd-card" href="#keep" data-page="keep">
+            <div class="cmd-card__name">keep / drop</div>
+            <div class="cmd-card__desc">Filter rows or select columns — both with a single verb.</div>
+          </a>
+          <a class="cmd-card" href="#generate" data-page="generate">
+            <div class="cmd-card__name">generate</div>
+            <div class="cmd-card__desc">Create a new column from an expression, optionally guarded by <code>if</code>.</div>
+          </a>
+          <a class="cmd-card" href="#collapse" data-page="collapse">
+            <div class="cmd-card__name">collapse</div>
+            <div class="cmd-card__desc">Aggregate by group — reduce rows to one per group.</div>
+          </a>
+        </div>
+
+        <div class="callout">
+          <div class="callout__h"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="square"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>where state lives</div>
+          <p>Every <code>use</code> materializes into <code>dodo._current</code> and starts a fresh CTE chain. Every transformation appends a step; nothing executes until you hit a <strong>terminal command</strong> like <code>list</code>, <code>count</code>, or <code>summarize</code>. See <a href="#how-it-works" data-page="how-it-works" style="color:var(--accent-deep);font-weight:600;">how it works</a>.</p>
+        </div>
+
+        <h2 id="gs-next">next steps</h2>
+        <ul>
+          <li>Run an existing <code>.do</code> file with the <a href="#do" data-page="do" style="color:var(--accent-deep);font-weight:600;">do</a> command.</li>
+          <li>If you wrote SQL by hand before, skim <a href="#expressions" data-page="expressions" style="color:var(--accent-deep);font-weight:600;">expression translation</a> to learn the cheat-sheet between <code>missing(x)</code> and <code>x IS NULL</code>.</li>
+          <li>Hook the DuckDB UI into a live view so every step shows up in the data panel.</li>
+        </ul>
+
+        <div class="pagefoot">
+          <a class="pagefoot__nav next" href="#install" data-page="install">
+            <span class="dir">next →</span>
+            <span class="ttl">installation</span>
+          </a>
+        </div>
+
+        <div class="pageedit">
+          <a href="#" onclick="return false">edit this page on github →</a>
+          <span>last updated · 2026-02-14</span>
+        </div>
+      </article>
+
+      <!-- ---------- page: install ---------- -->
+      <article class="page" id="page-install" data-screen-label="installation">
+        <div class="crumbs">
+          <a href="#getting-started" data-page="getting-started">docs</a>
+          <span class="sep">/</span>
+          <span class="cur">installation</span>
+        </div>
+
+        <h1 class="doc-h1">Installation</h1>
+        <p class="doc-lede">Two ways to get dodo: from the DuckDB community extension repository (recommended), or from source if you want to track <code>main</code>.</p>
+
+        <h2 id="i-extension">from the duckdb extension repo</h2>
+        <p>This is the path you want for almost any normal use. Works in the DuckDB CLI, the DuckDB UI, and every client library (Python, R, Java, Node, Rust).</p>
+
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">sql</span>
+            <span class="codeblock__title">// one time, persists across sessions</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-kw">INSTALL</span> dodo <span class="tok-kw">FROM</span> community;
+<span class="tok-kw">LOAD</span> dodo;</code></pre>
+        </div>
+
+        <p>After loading, the <code>do</code>, <code>use</code>, <code>generate</code>, <code>collapse</code> and other commands are registered as DuckDB statements. There's no separate REPL — you stay in the DuckDB shell.</p>
+
+        <h2 id="i-source">from source</h2>
+        <p>Build from source if you want to track the latest commit, or you need to run dodo on an architecture that isn't yet on the extension repo.</p>
+
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">bash</span>
+            <span class="codeblock__title">// requires git, cmake, a c++17 compiler</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-prompt">›</span> git clone --recurse-submodules https://github.com/codedthinking/dodo.git
+<span class="tok-prompt">›</span> <span class="tok-cmd">cd</span> dodo &amp;&amp; <span class="tok-cmd">make</span> release
+<span class="tok-prompt">›</span> ./build/release/duckdb</code></pre>
+        </div>
+
+        <p>The <code>release</code> target produces a DuckDB binary with dodo statically linked. Start it and the extension is already loaded — no <code>INSTALL</code>/<code>LOAD</code> required.</p>
+
+        <h2 id="i-verify">verify it loaded</h2>
+        <p>Drop <code>dodo_version()</code> into any session and the extension reports back.</p>
+
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">sql</span>
+            <span class="codeblock__title">// sanity check</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-kw">SELECT</span> <span class="tok-fn">dodo_version</span>(), <span class="tok-fn">dodo_build</span>();</code></pre>
+        </div>
+
+        <div class="outputblock"><span class="tok-com">┌───────────────┬──────────────────────────┐</span>
+<span class="tok-com">│</span> dodo_version  <span class="tok-com">│</span> dodo_build               <span class="tok-com">│</span>
+<span class="tok-com">├───────────────┼──────────────────────────┤</span>
+<span class="tok-com">│</span> <span class="tok-str">0.1.0</span>         <span class="tok-com">│</span> <span class="tok-str">2026-02-12 / 7a3b1c2</span>     <span class="tok-com">│</span>
+<span class="tok-com">└───────────────┴──────────────────────────┘</span></div>
+
+        <div class="callout callout--warn">
+          <div class="callout__h"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="square"><path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/></svg>duckdb version</div>
+          <p>dodo requires <strong>DuckDB ≥ 0.10.2</strong>. Older builds don't carry the extension entrypoint dodo uses to register its statements. Run <code>SELECT version();</code> if you're unsure.</p>
+        </div>
+
+        <div class="pagefoot">
+          <a class="pagefoot__nav" href="#getting-started" data-page="getting-started">
+            <span class="dir">← previous</span>
+            <span class="ttl">getting started</span>
+          </a>
+          <a class="pagefoot__nav next" href="#how-it-works" data-page="how-it-works">
+            <span class="dir">next →</span>
+            <span class="ttl">how it works</span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ---------- page: how-it-works ---------- -->
+      <article class="page" id="page-how-it-works" data-screen-label="how it works">
+        <div class="crumbs">
+          <a href="#getting-started" data-page="getting-started">docs</a>
+          <span class="sep">/</span>
+          <span class="cur">how it works</span>
+        </div>
+
+        <h1 class="doc-h1">How it works</h1>
+        <p class="doc-lede">dodo doesn't execute commands one at a time. Each transformation appends a step to a lazy CTE chain. Nothing runs until you ask for a result.</p>
+
+        <h2 id="hw-modes">two modes</h2>
+        <p>The decision happens at <code>use</code> time:</p>
+        <ul>
+          <li><strong>Materialized (default).</strong> <code>use "file.csv", clear</code> reads the file once into <code>dodo._current</code>. Subsequent commands build a CTE chain on top of that table.</li>
+          <li><strong>Lazy.</strong> <code>use "file.csv", lazy</code> skips materialization. The file is re-read every time a terminal command executes — useful when the file is huge and you only inspect a few rows.</li>
+        </ul>
+
+        <h2 id="hw-chain">the cte chain</h2>
+        <p>Each transformation appends a step. Nothing executes until a terminal command. The example below uses four commands; only <code>list</code> triggers a DuckDB execution.</p>
+
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">.do · sql</span>
+            <span class="codeblock__title">// what dodo does under the hood</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-cmd">use</span> <span class="tok-str">"firms.csv"</span>, <span class="tok-kw">clear</span>
+   <span class="tok-op">→</span>  <span class="tok-kw">CREATE TABLE</span> dodo._current <span class="tok-kw">AS SELECT</span> <span class="tok-op">*</span> <span class="tok-kw">FROM</span> <span class="tok-fn">read_csv</span>(<span class="tok-str">'firms.csv'</span>)
+       _s0 <span class="tok-kw">AS</span> (<span class="tok-kw">SELECT</span> <span class="tok-op">*</span> <span class="tok-kw">FROM</span> dodo._current)
+
+<span class="tok-cmd">keep</span> <span class="tok-kw">if</span> year <span class="tok-op">&gt;=</span> <span class="tok-num">2020</span>
+   <span class="tok-op">→</span>  _s1 <span class="tok-kw">AS</span> (<span class="tok-kw">SELECT</span> <span class="tok-op">*</span> <span class="tok-kw">FROM</span> _s0 <span class="tok-kw">WHERE</span> year <span class="tok-op">&gt;=</span> <span class="tok-num">2020</span>)
+
+<span class="tok-cmd">generate</span> profit <span class="tok-op">=</span> rev <span class="tok-op">-</span> cost
+   <span class="tok-op">→</span>  _s2 <span class="tok-kw">AS</span> (<span class="tok-kw">SELECT</span> <span class="tok-op">*</span>, rev <span class="tok-op">-</span> cost <span class="tok-kw">AS</span> profit <span class="tok-kw">FROM</span> _s1)
+
+<span class="tok-cmd">list</span>
+   <span class="tok-op">→</span>  <span class="tok-kw">WITH</span> _s0 <span class="tok-kw">AS</span> (...), _s1 <span class="tok-kw">AS</span> (...), _s2 <span class="tok-kw">AS</span> (...)
+       <span class="tok-kw">SELECT</span> <span class="tok-op">*</span> <span class="tok-kw">FROM</span> _s2;   <span class="tok-com">-- executes here</span></code></pre>
+        </div>
+
+        <p>Inspect the current chain at any point with <code>SELECT * FROM dodo._chain;</code>. Each row is one step, with its source command and the SQL it appends.</p>
+
+        <h2 id="hw-ui">duckdb ui integration</h2>
+        <p>Set <code>SET dodo_live_view = true;</code> and dodo creates a <code>_dodo_data</code> view after each command. The DuckDB UI data panel auto-refreshes when this view changes, so your data updates as you type.</p>
+
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">sql</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-kw">SET</span> dodo_live_view <span class="tok-op">=</span> <span class="tok-kw">true</span>;
+<span class="tok-kw">SELECT</span> <span class="tok-op">*</span> <span class="tok-kw">FROM</span> dodo._history;   <span class="tok-com">-- every command in this session</span></code></pre>
+        </div>
+
+        <div class="callout">
+          <div class="callout__h"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="square"><path d="M3 12h6l3 8 3-16 3 8h3"/></svg>why a chain, not a graph</div>
+          <p>The chain is strictly linear. That's not a constraint — it's the point. <code>.do</code> scripts read as a sequence of mutations, and <code>undo</code> is just "pop the last step." A DAG would let you fork the lineage but you'd also lose the <code>undo</code> contract that makes interactive sessions pleasant.</p>
+        </div>
+
+        <div class="pagefoot">
+          <a class="pagefoot__nav" href="#install" data-page="install">
+            <span class="dir">← previous</span>
+            <span class="ttl">installation</span>
+          </a>
+          <a class="pagefoot__nav next" href="#use" data-page="use">
+            <span class="dir">next →</span>
+            <span class="ttl">use</span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ---------- page: use ---------- -->
+      <article class="page" id="page-use" data-screen-label="use command">
+        <div class="crumbs">
+          <a href="#getting-started" data-page="getting-started">docs</a>
+          <span class="sep">/</span>
+          <a href="#" onclick="return false">commands</a>
+          <span class="sep">/</span>
+          <a href="#" onclick="return false">io</a>
+          <span class="sep">/</span>
+          <span class="cur">use</span>
+        </div>
+
+        <h1 class="doc-h1"><span class="mono">use</span></h1>
+        <p class="doc-lede">Load data from a file or an existing DuckDB table. Replaces the current dataset and starts a new CTE chain.</p>
+
+        <h2 id="u-syntax">syntax</h2>
+        <div class="syntax">
+<span class="cmd">use</span> <span class="req">source</span> [, <span class="opt">clear</span> | <span class="opt">lazy</span> | <span class="opt">table</span>]
+        </div>
+        <p><code>source</code> is either a quoted file path (CSV / Parquet / JSON) or a bare identifier referring to an existing DuckDB table. Pass <code>clear</code> to drop the previous dataset before loading.</p>
+
+        <h2 id="u-examples">examples</h2>
+
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">.do</span>
+            <span class="codeblock__title">// from files</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-cmd">use</span> <span class="tok-str">"data/firms.csv"</span>, <span class="tok-kw">clear</span>;
+<span class="tok-cmd">use</span> <span class="tok-str">"data/firms.parquet"</span>, <span class="tok-kw">clear</span>;
+<span class="tok-cmd">use</span> <span class="tok-str">"s3://bucket/firms.parquet"</span>, <span class="tok-kw">clear</span>;</code></pre>
+        </div>
+
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">.do</span>
+            <span class="codeblock__title">// from an existing duckdb table</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-cmd">use</span> firms_2024, <span class="tok-kw">clear</span>;
+<span class="tok-cmd">use</span> main.firms_2024, <span class="tok-kw">clear</span>;</code></pre>
+        </div>
+
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">.do</span>
+            <span class="codeblock__title">// lazy mode — no materialization</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-cmd">use</span> <span class="tok-str">"data/firms.csv"</span>, <span class="tok-kw">lazy</span>;
+<span class="tok-cmd">head</span> <span class="tok-num">10</span>;     <span class="tok-com">// re-reads the file each time</span></code></pre>
+        </div>
+
+        <h2 id="u-sql">sql translation</h2>
+        <p>The default (materialized) <code>use "firms.csv", clear</code> compiles to:</p>
+
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">sql</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-kw">DROP TABLE IF EXISTS</span> dodo._current;
+<span class="tok-kw">CREATE TABLE</span> dodo._current <span class="tok-kw">AS</span>
+  <span class="tok-kw">SELECT</span> <span class="tok-op">*</span> <span class="tok-kw">FROM</span> <span class="tok-fn">read_csv</span>(<span class="tok-str">'firms.csv'</span>, header <span class="tok-op">=</span> <span class="tok-kw">true</span>);</code></pre>
+        </div>
+
+        <h2 id="u-notes">notes</h2>
+        <ul>
+          <li><code>clear</code> is required if the current dataset isn't empty — dodo refuses to silently shadow existing data.</li>
+          <li>File formats are detected by extension. Override with explicit options if needed.</li>
+          <li>Lazy mode pairs well with <code>head</code> and <code>count</code>; it pairs poorly with iterative <code>generate</code> chains, since each terminal command re-reads the source.</li>
+        </ul>
+
+        <div class="callout callout--danger">
+          <div class="callout__h"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="square"><path d="M18 6 6 18M6 6l12 12"/></svg>not yet supported</div>
+          <p>Stata <code>.dta</code> files are <strong>not</strong> a <code>use</code> source. They require a separate reader; see <a href="#" onclick="return false" style="color:var(--accent-deep);font-weight:600;">known limitations</a> for the workaround.</p>
+        </div>
+
+        <div class="pagefoot">
+          <a class="pagefoot__nav" href="#how-it-works" data-page="how-it-works">
+            <span class="dir">← previous</span>
+            <span class="ttl">how it works</span>
+          </a>
+          <a class="pagefoot__nav next" href="#save" data-page="save">
+            <span class="dir">next →</span>
+            <span class="ttl">save</span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ---------- page: keep ---------- -->
+      <article class="page" id="page-keep" data-screen-label="keep command">
+        <div class="crumbs">
+          <a href="#getting-started" data-page="getting-started">docs</a>
+          <span class="sep">/</span>
+          <a href="#" onclick="return false">commands</a>
+          <span class="sep">/</span>
+          <a href="#" onclick="return false">transform</a>
+          <span class="sep">/</span>
+          <span class="cur">keep</span>
+        </div>
+
+        <h1 class="doc-h1"><span class="mono">keep</span></h1>
+        <p class="doc-lede">Keep specific columns, or keep rows matching a condition. The same verb does both — dodo picks the behavior from the argument shape.</p>
+
+        <h2 id="k-syntax">syntax</h2>
+        <div class="syntax">
+<span class="cmd">keep</span> <span class="req">varlist</span>
+<span class="cmd">keep</span> <span class="opt">if</span> <span class="req">condition</span>
+<span class="cmd">keep</span> <span class="req">varlist</span> <span class="opt">if</span> <span class="req">condition</span>
+        </div>
+
+        <h2 id="k-examples">examples</h2>
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">.do</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-com">// columns only</span>
+<span class="tok-cmd">keep</span> id revenue year;
+
+<span class="tok-com">// rows only — boolean expression after `if`</span>
+<span class="tok-cmd">keep</span> <span class="tok-kw">if</span> year <span class="tok-op">&gt;=</span> <span class="tok-num">2020</span>;
+<span class="tok-cmd">keep</span> <span class="tok-kw">if</span> <span class="tok-op">!</span><span class="tok-fn">missing</span>(revenue) <span class="tok-op">&amp;</span> sector <span class="tok-op">==</span> <span class="tok-str">"finance"</span>;
+
+<span class="tok-com">// both at once</span>
+<span class="tok-cmd">keep</span> id revenue <span class="tok-kw">if</span> year <span class="tok-op">&gt;=</span> <span class="tok-num">2020</span>;</code></pre>
+        </div>
+
+        <h2 id="k-sql">sql translation</h2>
+        <p><code>keep id revenue if year &gt;= 2020</code> appends a CTE that selects only those columns, filtered by the predicate:</p>
+
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">sql</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code>_sN <span class="tok-kw">AS</span> (
+  <span class="tok-kw">SELECT</span> id, revenue
+  <span class="tok-kw">FROM</span> _s(N-1)
+  <span class="tok-kw">WHERE</span> year <span class="tok-op">&gt;=</span> <span class="tok-num">2020</span>
+)</code></pre>
+        </div>
+
+        <h2 id="k-notes">notes</h2>
+        <ul>
+          <li>To do the opposite — drop columns or filter out rows — see <code>drop</code>.</li>
+          <li>Comparisons use SQL semantics: <code>NULL</code> propagates. Use <code>missing(x)</code> to test for nulls explicitly.</li>
+          <li>String literals are double-quoted. Single quotes work too but double is canonical in <code>.do</code> syntax.</li>
+        </ul>
+
+        <div class="pagefoot">
+          <a class="pagefoot__nav" href="#use" data-page="use">
+            <span class="dir">← previous</span>
+            <span class="ttl">use</span>
+          </a>
+          <a class="pagefoot__nav next" href="#generate" data-page="generate">
+            <span class="dir">next →</span>
+            <span class="ttl">generate</span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ---------- page: generate ---------- -->
+      <article class="page" id="page-generate" data-screen-label="generate command">
+        <div class="crumbs">
+          <a href="#getting-started" data-page="getting-started">docs</a>
+          <span class="sep">/</span>
+          <a href="#" onclick="return false">commands</a>
+          <span class="sep">/</span>
+          <a href="#" onclick="return false">transform</a>
+          <span class="sep">/</span>
+          <span class="cur">generate</span>
+        </div>
+
+        <h1 class="doc-h1"><span class="mono">generate</span></h1>
+        <p class="doc-lede">Create a new column from an expression. Optionally guarded by <code>if</code> — rows that fail the condition get <code>NULL</code> for the new column.</p>
+
+        <h2 id="g-syntax">syntax</h2>
+        <div class="syntax">
+<span class="cmd">generate</span> <span class="req">newvar</span> = <span class="req">expression</span> [<span class="opt">if</span> <span class="req">condition</span>]
+        </div>
+
+        <h2 id="g-examples">examples</h2>
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">.do</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-cmd">generate</span> profit <span class="tok-op">=</span> revenue <span class="tok-op">-</span> cost;
+<span class="tok-cmd">generate</span> ln_rev <span class="tok-op">=</span> <span class="tok-fn">log</span>(revenue);
+<span class="tok-cmd">generate</span> high_rev <span class="tok-op">=</span> revenue <span class="tok-op">&gt;</span> <span class="tok-num">1000</span> <span class="tok-kw">if</span> year <span class="tok-op">&gt;=</span> <span class="tok-num">2020</span>;
+<span class="tok-cmd">generate</span> sector_label <span class="tok-op">=</span> <span class="tok-fn">cond</span>(sector <span class="tok-op">==</span> <span class="tok-str">"fin"</span>, <span class="tok-str">"Finance"</span>, sector);</code></pre>
+        </div>
+
+        <h2 id="g-sql">sql translation</h2>
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">sql</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-com">-- generate profit = revenue - cost</span>
+_sN <span class="tok-kw">AS</span> (<span class="tok-kw">SELECT</span> <span class="tok-op">*</span>, revenue <span class="tok-op">-</span> cost <span class="tok-kw">AS</span> profit <span class="tok-kw">FROM</span> _s(N-1))
+
+<span class="tok-com">-- generate high_rev = revenue &gt; 1000 if year &gt;= 2020</span>
+_sN <span class="tok-kw">AS</span> (
+  <span class="tok-kw">SELECT</span> <span class="tok-op">*</span>,
+    <span class="tok-kw">CASE WHEN</span> year <span class="tok-op">&gt;=</span> <span class="tok-num">2020</span>
+         <span class="tok-kw">THEN</span> revenue <span class="tok-op">&gt;</span> <span class="tok-num">1000</span> <span class="tok-kw">ELSE NULL END</span> <span class="tok-kw">AS</span> high_rev
+  <span class="tok-kw">FROM</span> _s(N-1)
+)</code></pre>
+        </div>
+
+        <h2 id="g-notes">notes</h2>
+        <ul>
+          <li>The new column must not already exist. Use <code>replace</code> to overwrite.</li>
+          <li>Expressions support arithmetic, string, date, and the full Stata-style function set — see <a href="#expressions" data-page="expressions" style="color:var(--accent-deep);font-weight:600;">expression translation</a>.</li>
+          <li><code>generate</code> is row-wise. For aggregate or windowed computations (mean by group, row numbers), use <code>egen</code>.</li>
+        </ul>
+
+        <div class="pagefoot">
+          <a class="pagefoot__nav" href="#keep" data-page="keep">
+            <span class="dir">← previous</span>
+            <span class="ttl">keep</span>
+          </a>
+          <a class="pagefoot__nav next" href="#collapse" data-page="collapse">
+            <span class="dir">next →</span>
+            <span class="ttl">collapse</span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ---------- page: collapse ---------- -->
+      <article class="page" id="page-collapse" data-screen-label="collapse command">
+        <div class="crumbs">
+          <a href="#getting-started" data-page="getting-started">docs</a>
+          <span class="sep">/</span>
+          <a href="#" onclick="return false">commands</a>
+          <span class="sep">/</span>
+          <a href="#" onclick="return false">transform</a>
+          <span class="sep">/</span>
+          <span class="cur">collapse</span>
+        </div>
+
+        <h1 class="doc-h1"><span class="mono">collapse</span></h1>
+        <p class="doc-lede">Aggregate the dataset, reducing rows to one per group. Multiple aggregators in one call, optional <code>by()</code>.</p>
+
+        <h2 id="c-syntax">syntax</h2>
+        <div class="syntax">
+<span class="cmd">collapse</span> (<span class="req">stat</span>) <span class="req">newvar</span> = <span class="req">var</span> [(<span class="req">stat</span>) <span class="req">newvar</span> = <span class="req">var</span>] ... [, <span class="opt">by(</span><span class="req">groupvars</span><span class="opt">)</span>]
+        </div>
+        <p>Supported stats: <code>mean</code>, <code>sum</code>, <code>count</code>, <code>min</code>, <code>max</code>, <code>sd</code>, <code>median</code>, <code>p25</code>, <code>p75</code>, <code>first</code>, <code>last</code>.</p>
+
+        <h2 id="c-examples">examples</h2>
+
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">.do</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-com">// mean revenue, total revenue, row count per sector × year</span>
+<span class="tok-cmd">collapse</span> (mean) avg_rev <span class="tok-op">=</span> revenue
+         (sum)  total   <span class="tok-op">=</span> revenue
+         (count) n      <span class="tok-op">=</span> id,
+         by(sector year);
+
+<span class="tok-com">// implicit names — keeps the original column name</span>
+<span class="tok-cmd">collapse</span> (mean) revenue profit, by(sector);</code></pre>
+        </div>
+
+        <h2 id="c-sql">sql translation</h2>
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">sql</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code>_sN <span class="tok-kw">AS</span> (
+  <span class="tok-kw">SELECT</span>
+    sector, year,
+    <span class="tok-fn">AVG</span>(revenue) <span class="tok-kw">AS</span> avg_rev,
+    <span class="tok-fn">SUM</span>(revenue) <span class="tok-kw">AS</span> total,
+    <span class="tok-fn">COUNT</span>(id)    <span class="tok-kw">AS</span> n
+  <span class="tok-kw">FROM</span> _s(N-1)
+  <span class="tok-kw">GROUP BY</span> sector, year
+)</code></pre>
+        </div>
+
+        <h2 id="c-notes">notes</h2>
+        <ul>
+          <li>After <code>collapse</code>, the only columns that survive are the <code>by()</code> group keys and the aggregated newvars. Use <code>egen</code> instead if you want to keep all original rows alongside a group statistic.</li>
+          <li>An empty <code>by()</code> collapses the entire dataset to a single row.</li>
+          <li>Stat names map 1:1 to DuckDB aggregates; <code>p25</code>/<code>p75</code>/<code>median</code> compile to <code>QUANTILE_CONT</code>.</li>
+        </ul>
+
+        <div class="pagefoot">
+          <a class="pagefoot__nav" href="#generate" data-page="generate">
+            <span class="dir">← previous</span>
+            <span class="ttl">generate</span>
+          </a>
+          <a class="pagefoot__nav next" href="#merge" data-page="merge">
+            <span class="dir">next →</span>
+            <span class="ttl">merge</span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ---------- page: merge ---------- -->
+      <article class="page" id="page-merge" data-screen-label="merge command">
+        <div class="crumbs">
+          <a href="#getting-started" data-page="getting-started">docs</a>
+          <span class="sep">/</span>
+          <a href="#" onclick="return false">commands</a>
+          <span class="sep">/</span>
+          <a href="#" onclick="return false">transform</a>
+          <span class="sep">/</span>
+          <span class="cur">merge</span>
+        </div>
+
+        <h1 class="doc-h1"><span class="mono">merge</span></h1>
+        <p class="doc-lede">Join two datasets. The cardinality (<code>1:1</code>, <code>m:1</code>, <code>1:m</code>, <code>m:m</code>) is declared explicitly so dodo can verify it and bail loudly if your assumption is wrong.</p>
+
+        <h2 id="m-syntax">syntax</h2>
+        <div class="syntax">
+<span class="cmd">merge</span> <span class="req">cardinality</span> <span class="req">keys</span> <span class="opt">using</span> <span class="req">source</span> [, <span class="opt">keep(match | master | using)</span>]
+                                  [, <span class="opt">keepusing(</span><span class="req">vars</span><span class="opt">)</span>]
+                                  [, <span class="opt">nogenerate</span>]
+        </div>
+
+        <h2 id="m-examples">examples</h2>
+
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">.do</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-com">// one-to-one by composite key</span>
+<span class="tok-cmd">merge</span> 1:1 id year <span class="tok-kw">using</span> <span class="tok-str">"other_data.csv"</span>;
+
+<span class="tok-com">// many-to-one lookup — keep only matched rows</span>
+<span class="tok-cmd">merge</span> m:1 sector <span class="tok-kw">using</span> <span class="tok-str">"sector_names.csv"</span>, keep(match);
+
+<span class="tok-com">// pull a single column over, don't add _merge indicator</span>
+<span class="tok-cmd">merge</span> 1:1 id <span class="tok-kw">using</span> <span class="tok-str">"extra.csv"</span>, keepusing(new_var) nogenerate;</code></pre>
+        </div>
+
+        <p>By default <code>merge</code> creates a <code>_merge</code> indicator column with values <code>1</code> (master only), <code>2</code> (using only), or <code>3</code> (matched). Pass <code>nogenerate</code> to suppress it.</p>
+
+        <h2 id="m-sql">sql translation</h2>
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">sql</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-com">-- merge 1:1 id year using "other.csv"</span>
+_sN <span class="tok-kw">AS</span> (
+  <span class="tok-kw">SELECT</span> m.<span class="tok-op">*</span>, u.<span class="tok-op">*</span>,
+    <span class="tok-kw">CASE</span>
+      <span class="tok-kw">WHEN</span> m.id <span class="tok-kw">IS NULL</span> <span class="tok-kw">THEN</span> <span class="tok-num">2</span>
+      <span class="tok-kw">WHEN</span> u.id <span class="tok-kw">IS NULL</span> <span class="tok-kw">THEN</span> <span class="tok-num">1</span>
+      <span class="tok-kw">ELSE</span> <span class="tok-num">3</span>
+    <span class="tok-kw">END</span> <span class="tok-kw">AS</span> _merge
+  <span class="tok-kw">FROM</span> _s(N-1) m
+  <span class="tok-kw">FULL OUTER JOIN</span> <span class="tok-fn">read_csv</span>(<span class="tok-str">'other.csv'</span>) u
+    <span class="tok-kw">USING</span> (id, year)
+)</code></pre>
+        </div>
+
+        <h2 id="m-notes">notes</h2>
+        <ul>
+          <li>Cardinality is enforced. <code>1:1</code> raises if the join produces duplicates on either side. This is a feature; it catches bad merges before they corrupt downstream steps.</li>
+          <li><code>keep(match)</code> is an <code>INNER JOIN</code>. <code>keep(master)</code> is a <code>LEFT</code> join. The default is <code>FULL OUTER</code> with the <code>_merge</code> indicator.</li>
+          <li><code>using</code> accepts a file path, a table name, or another CTE — the same resolution rules as <code>use</code>.</li>
+        </ul>
+
+        <div class="callout">
+          <div class="callout__h"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="square"><circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16h.01"/></svg>cardinality is not a hint</div>
+          <p>Stata users sometimes treat <code>1:1</code> as documentation. In dodo it's a contract — if either side has duplicate keys, the merge fails loudly with the offending key printed. To allow duplicates, use <code>m:1</code>, <code>1:m</code>, or <code>m:m</code>.</p>
+        </div>
+
+        <div class="pagefoot">
+          <a class="pagefoot__nav" href="#collapse" data-page="collapse">
+            <span class="dir">← previous</span>
+            <span class="ttl">collapse</span>
+          </a>
+          <a class="pagefoot__nav next" href="#expressions" data-page="expressions">
+            <span class="dir">next →</span>
+            <span class="ttl">expression translation</span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ---------- page: expressions ---------- -->
+      <article class="page" id="page-expressions" data-screen-label="expression translation">
+        <div class="crumbs">
+          <a href="#getting-started" data-page="getting-started">docs</a>
+          <span class="sep">/</span>
+          <a href="#" onclick="return false">guides</a>
+          <span class="sep">/</span>
+          <span class="cur">expression translation</span>
+        </div>
+
+        <h1 class="doc-h1">Expression translation</h1>
+        <p class="doc-lede">Every expression you write inside <code>generate</code>, <code>replace</code>, or <code>keep if</code> compiles to SQL under the hood. Here's the full mapping.</p>
+
+        <h2 id="x-numeric">numeric &amp; logical</h2>
+        <table>
+          <thead><tr><th>.do syntax</th><th>sql equivalent</th></tr></thead>
+          <tbody>
+            <tr><td><code>log(x)</code></td><td><code>LN(x)</code></td></tr>
+            <tr><td><code>abs(x)</code></td><td><code>ABS(x)</code></td></tr>
+            <tr><td><code>round(x, 2)</code></td><td><code>ROUND(x, 2)</code></td></tr>
+            <tr><td><code>missing(x)</code></td><td><code>x IS NULL</code></td></tr>
+            <tr><td><code>cond(a, b, c)</code></td><td><code>CASE WHEN a THEN b ELSE c END</code></td></tr>
+            <tr><td><code>inrange(x, 1, 10)</code></td><td><code>x BETWEEN 1 AND 10</code></td></tr>
+            <tr><td><code>inlist(x, 1, 2, 3)</code></td><td><code>x IN (1, 2, 3)</code></td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="x-string">string</h2>
+        <table>
+          <thead><tr><th>.do syntax</th><th>sql equivalent</th></tr></thead>
+          <tbody>
+            <tr><td><code>substr(s, 1, 3)</code></td><td><code>SUBSTRING(s, 1, 3)</code></td></tr>
+            <tr><td><code>strlen(s)</code></td><td><code>LENGTH(s)</code></td></tr>
+            <tr><td><code>strlower(s)</code></td><td><code>LOWER(s)</code></td></tr>
+            <tr><td><code>strupper(s)</code></td><td><code>UPPER(s)</code></td></tr>
+            <tr><td><code>strtrim(s)</code></td><td><code>TRIM(s)</code></td></tr>
+            <tr><td><code>real(s)</code></td><td><code>CAST(s AS DOUBLE)</code></td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="x-row">row position</h2>
+        <table>
+          <thead><tr><th>.do syntax</th><th>sql equivalent</th></tr></thead>
+          <tbody>
+            <tr><td><code>_n</code></td><td><code>ROW_NUMBER() OVER (...)</code></td></tr>
+            <tr><td><code>_N</code></td><td><code>COUNT(*) OVER (...)</code></td></tr>
+            <tr><td><code>x[_n-1]</code></td><td><code>LAG(x, 1) OVER (...)</code> · positional, no gap check</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="x-time">time-series operators</h2>
+        <p>These require <code>tsset</code> or <code>xtset</code> to declare the panel/time structure first. The <code>L.</code>/<code>F.</code>/<code>D.</code> family is <em>gap-aware</em> — it returns <code>NULL</code> if the previous period is missing instead of silently slipping to the row before.</p>
+
+        <table>
+          <thead><tr><th>.do syntax</th><th>sql equivalent</th></tr></thead>
+          <tbody>
+            <tr><td><code>L.x</code></td><td>gap-aware <code>LAG(x) OVER (...)</code></td></tr>
+            <tr><td><code>F.x</code></td><td>gap-aware <code>LEAD(x) OVER (...)</code></td></tr>
+            <tr><td><code>D.x</code></td><td><code>x - L.x</code></td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout callout--warn">
+          <div class="callout__h"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="square"><path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/></svg>positional vs. gap-aware</div>
+          <p><code>x[_n-1]</code> is the previous <em>row</em>. <code>L.x</code> is the previous <em>period</em>. If your data has missing years (or your panel is unbalanced), these return different values. Use <code>L.</code> by default unless you specifically want the row-before semantics.</p>
+        </div>
+
+        <div class="pagefoot">
+          <a class="pagefoot__nav" href="#merge" data-page="merge">
+            <span class="dir">← previous</span>
+            <span class="ttl">merge</span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ---------- pages: save / append / import / export / do / clear / drop / etc — stub redirect to getting-started ---------- -->
+      <article class="page" id="page-save" data-screen-label="save command">
+        <div class="crumbs">
+          <a href="#getting-started" data-page="getting-started">docs</a>
+          <span class="sep">/</span>
+          <a href="#" onclick="return false">commands</a>
+          <span class="sep">/</span>
+          <a href="#" onclick="return false">io</a>
+          <span class="sep">/</span>
+          <span class="cur">save</span>
+        </div>
+        <h1 class="doc-h1"><span class="mono">save</span></h1>
+        <p class="doc-lede">Write the current data to disk or to an in-memory DuckDB table.</p>
+
+        <h2 id="s-syntax">syntax</h2>
+        <div class="syntax">
+<span class="cmd">save</span> <span class="req">target</span> [, <span class="opt">replace</span>] [, <span class="opt">table</span>]
+        </div>
+
+        <h2 id="s-examples">examples</h2>
+        <div class="codeblock">
+          <div class="codeblock__head"><span class="codeblock__lang">.do</span><button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button></div>
+<pre><code><span class="tok-cmd">save</span> <span class="tok-str">"output.csv"</span>, <span class="tok-kw">replace</span>;
+<span class="tok-cmd">save</span> <span class="tok-str">"output.parquet"</span>, <span class="tok-kw">replace</span>;
+<span class="tok-cmd">save</span> my_table, <span class="tok-kw">replace</span> <span class="tok-kw">table</span>;     <span class="tok-com">// in-memory duckdb table</span></code></pre>
+        </div>
+
+        <h2 id="s-notes">notes</h2>
+        <ul>
+          <li>Format is inferred from the extension. <code>.csv</code>, <code>.parquet</code>, <code>.json</code>, <code>.tsv</code> are supported.</li>
+          <li>The <code>table</code> option writes to an in-memory DuckDB table rather than disk. This is the only way to reach the data from straight SQL.</li>
+          <li><code>save</code> is a terminal command — it executes the chain.</li>
+        </ul>
+
+        <div class="pagefoot">
+          <a class="pagefoot__nav" href="#use" data-page="use">
+            <span class="dir">← previous</span>
+            <span class="ttl">use</span>
+          </a>
+          <a class="pagefoot__nav next" href="#append" data-page="append">
+            <span class="dir">next →</span>
+            <span class="ttl">append</span>
+          </a>
+        </div>
+      </article>
+
+      <article class="page" id="page-append" data-screen-label="append command">
+        <div class="crumbs"><a href="#getting-started" data-page="getting-started">docs</a><span class="sep">/</span><a href="#" onclick="return false">commands</a><span class="sep">/</span><a href="#" onclick="return false">io</a><span class="sep">/</span><span class="cur">append</span></div>
+        <h1 class="doc-h1"><span class="mono">append</span></h1>
+        <p class="doc-lede">Stack another dataset below the current one. Columns are matched by name; missing columns become <code>NULL</code>.</p>
+
+        <h2 id="a-syntax">syntax</h2>
+        <div class="syntax"><span class="cmd">append</span> <span class="opt">using</span> <span class="req">source</span></div>
+
+        <h2 id="a-examples">examples</h2>
+        <div class="codeblock">
+          <div class="codeblock__head"><span class="codeblock__lang">.do</span><button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button></div>
+<pre><code><span class="tok-cmd">append</span> <span class="tok-kw">using</span> <span class="tok-str">"more_firms.csv"</span>;
+<span class="tok-cmd">append</span> <span class="tok-kw">using</span> firms_2025;       <span class="tok-com">// existing duckdb table</span></code></pre>
+        </div>
+
+        <h2 id="a-sql">sql translation</h2>
+        <div class="codeblock">
+          <div class="codeblock__head"><span class="codeblock__lang">sql</span><button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button></div>
+<pre><code>_sN <span class="tok-kw">AS</span> (
+  <span class="tok-kw">SELECT</span> <span class="tok-op">*</span> <span class="tok-kw">FROM</span> _s(N-1)
+  <span class="tok-kw">UNION ALL BY NAME</span>
+  <span class="tok-kw">SELECT</span> <span class="tok-op">*</span> <span class="tok-kw">FROM</span> <span class="tok-fn">read_csv</span>(<span class="tok-str">'more_firms.csv'</span>)
+)</code></pre>
+        </div>
+
+        <div class="pagefoot">
+          <a class="pagefoot__nav" href="#save" data-page="save"><span class="dir">← previous</span><span class="ttl">save</span></a>
+          <a class="pagefoot__nav next" href="#do" data-page="do"><span class="dir">next →</span><span class="ttl">do</span></a>
+        </div>
+      </article>
+
+      <article class="page" id="page-do" data-screen-label="do command">
+        <div class="crumbs"><a href="#getting-started" data-page="getting-started">docs</a><span class="sep">/</span><a href="#" onclick="return false">commands</a><span class="sep">/</span><a href="#" onclick="return false">io</a><span class="sep">/</span><span class="cur">do</span></div>
+        <h1 class="doc-h1"><span class="mono">do</span></h1>
+        <p class="doc-lede">Run a <code>.do</code> file end-to-end. No semicolons needed inside the file — newlines separate statements.</p>
+
+        <h2 id="d-syntax">syntax</h2>
+        <div class="syntax"><span class="cmd">do</span> <span class="req">path</span></div>
+
+        <h2 id="d-examples">examples</h2>
+        <div class="codeblock">
+          <div class="codeblock__head"><span class="codeblock__lang">sql</span><button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button></div>
+<pre><code><span class="tok-cmd">do</span> <span class="tok-str">"analysis/clean.do"</span>;
+<span class="tok-cmd">list</span>;    <span class="tok-com">// inspect results after the script runs</span></code></pre>
+        </div>
+
+        <p>The script uses standard Stata-style comment markers:</p>
+
+        <div class="codeblock">
+          <div class="codeblock__head"><span class="codeblock__lang">.do</span><span class="codeblock__title">clean.do</span><button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button></div>
+<pre><code><span class="tok-com">* this is a line comment</span>
+<span class="tok-com">// this is also a comment</span>
+<span class="tok-com">/* this is a
+   block comment */</span>
+
+<span class="tok-cmd">use</span> <span class="tok-str">"data.csv"</span>, <span class="tok-kw">clear</span>
+
+<span class="tok-cmd">keep</span> <span class="tok-kw">if</span> year <span class="tok-op">&gt;=</span> <span class="tok-num">2020</span>    <span class="tok-com">// inline comment</span>
+<span class="tok-cmd">generate</span> profit <span class="tok-op">=</span> <span class="tok-op">///</span>
+    revenue <span class="tok-op">-</span> cost          <span class="tok-com">// line continuation with ///</span></code></pre>
+        </div>
+
+        <h2 id="d-notes">notes</h2>
+        <ul>
+          <li>Terminal commands inside <code>.do</code> files are <strong>skipped</strong> — inspect results interactively after the script finishes.</li>
+          <li>Working directory follows the calling session, not the script's location. Use absolute paths if you need stability.</li>
+          <li>Errors halt execution and surface the offending line number. The CTE chain rolls back to its pre-<code>do</code> state.</li>
+        </ul>
+
+        <div class="pagefoot">
+          <a class="pagefoot__nav" href="#append" data-page="append"><span class="dir">← previous</span><span class="ttl">append</span></a>
+          <a class="pagefoot__nav next" href="#clear" data-page="clear"><span class="dir">next →</span><span class="ttl">clear</span></a>
+        </div>
+      </article>
+
+      <article class="page" id="page-clear" data-screen-label="clear command">
+        <div class="crumbs"><a href="#getting-started" data-page="getting-started">docs</a><span class="sep">/</span><a href="#" onclick="return false">commands</a><span class="sep">/</span><a href="#" onclick="return false">io</a><span class="sep">/</span><span class="cur">clear</span></div>
+        <h1 class="doc-h1"><span class="mono">clear</span></h1>
+        <p class="doc-lede">Drop the current dataset and all associated state — the CTE chain, the history table, registered tempfiles, panel declarations.</p>
+
+        <h2 id="cl-syntax">syntax</h2>
+        <div class="syntax"><span class="cmd">clear</span> [<span class="opt">all</span>]</div>
+
+        <h2 id="cl-examples">examples</h2>
+        <div class="codeblock">
+          <div class="codeblock__head"><span class="codeblock__lang">.do</span><button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button></div>
+<pre><code><span class="tok-cmd">clear</span>;           <span class="tok-com">// drop current dataset + chain</span>
+<span class="tok-cmd">clear</span> <span class="tok-kw">all</span>;       <span class="tok-com">// also drop tempfiles, labels, panel declarations</span></code></pre>
+        </div>
+
+        <div class="pagefoot">
+          <a class="pagefoot__nav" href="#do" data-page="do"><span class="dir">← previous</span><span class="ttl">do</span></a>
+        </div>
+      </article>
+
+      <!-- import / export / drop / replace / rename / sort / order / egen / mvencode / reshape / duplicates / expand — stub redirect -->
+      <article class="page" id="page-import-delimited" data-screen-label="import delimited">
+        <div class="crumbs"><a href="#getting-started" data-page="getting-started">docs</a><span class="sep">/</span><span class="cur">import delimited</span></div>
+        <h1 class="doc-h1"><span class="mono">import delimited</span></h1>
+        <p class="doc-lede">Read a CSV file. Alias for <code>use</code> with a CSV path — exists for Stata-script compatibility.</p>
+        <div class="codeblock"><div class="codeblock__head"><span class="codeblock__lang">.do</span></div><pre><code><span class="tok-cmd">import delimited</span> <span class="tok-str">"data/survey.csv"</span>, <span class="tok-kw">clear</span>;</code></pre></div>
+        <div class="pagefoot"><a class="pagefoot__nav next" href="#use" data-page="use"><span class="dir">see →</span><span class="ttl">use</span></a></div>
+      </article>
+
+      <article class="page" id="page-export-delimited" data-screen-label="export delimited">
+        <div class="crumbs"><a href="#getting-started" data-page="getting-started">docs</a><span class="sep">/</span><span class="cur">export delimited</span></div>
+        <h1 class="doc-h1"><span class="mono">export delimited</span></h1>
+        <p class="doc-lede">Write the current data to a CSV file. Alias for <code>save</code> with a CSV path.</p>
+        <div class="codeblock"><div class="codeblock__head"><span class="codeblock__lang">.do</span></div><pre><code><span class="tok-cmd">export delimited</span> <span class="tok-kw">using</span> <span class="tok-str">"output.csv"</span>, <span class="tok-kw">replace</span>;</code></pre></div>
+        <div class="pagefoot"><a class="pagefoot__nav next" href="#save" data-page="save"><span class="dir">see →</span><span class="ttl">save</span></a></div>
+      </article>
+
+      <article class="page" id="page-drop" data-screen-label="drop command">
+        <div class="crumbs"><a href="#getting-started" data-page="getting-started">docs</a><span class="sep">/</span><span class="cur">drop</span></div>
+        <h1 class="doc-h1"><span class="mono">drop</span></h1>
+        <p class="doc-lede">Drop columns by name, or drop rows matching a condition. Inverse of <code>keep</code>.</p>
+        <div class="syntax"><span class="cmd">drop</span> <span class="req">varlist</span><br/><span class="cmd">drop</span> <span class="opt">if</span> <span class="req">condition</span></div>
+        <div class="codeblock"><div class="codeblock__head"><span class="codeblock__lang">.do</span></div><pre><code><span class="tok-cmd">drop</span> temp_var debug_flag;
+<span class="tok-cmd">drop</span> <span class="tok-kw">if</span> <span class="tok-fn">missing</span>(revenue);</code></pre></div>
+        <div class="pagefoot"><a class="pagefoot__nav" href="#keep" data-page="keep"><span class="dir">see also →</span><span class="ttl">keep</span></a></div>
+      </article>
+
+      <article class="page" id="page-replace" data-screen-label="replace command">
+        <div class="crumbs"><a href="#getting-started" data-page="getting-started">docs</a><span class="sep">/</span><span class="cur">replace</span></div>
+        <h1 class="doc-h1"><span class="mono">replace</span></h1>
+        <p class="doc-lede">Overwrite an existing column's values. Unlike <code>generate</code>, the target column must already exist.</p>
+        <div class="syntax"><span class="cmd">replace</span> <span class="req">var</span> = <span class="req">expression</span> [<span class="opt">if</span> <span class="req">condition</span>]</div>
+        <div class="codeblock"><div class="codeblock__head"><span class="codeblock__lang">.do</span></div><pre><code><span class="tok-cmd">replace</span> revenue <span class="tok-op">=</span> <span class="tok-num">0</span> <span class="tok-kw">if</span> <span class="tok-fn">missing</span>(revenue);
+<span class="tok-cmd">replace</span> name <span class="tok-op">=</span> <span class="tok-str">"Unknown"</span> <span class="tok-kw">if</span> <span class="tok-fn">missing</span>(name);</code></pre></div>
+      </article>
+
+      <article class="page" id="page-rename" data-screen-label="rename command">
+        <div class="crumbs"><a href="#getting-started" data-page="getting-started">docs</a><span class="sep">/</span><span class="cur">rename</span></div>
+        <h1 class="doc-h1"><span class="mono">rename</span></h1>
+        <p class="doc-lede">Rename a column. Idempotent — renaming to the existing name is a no-op.</p>
+        <div class="syntax"><span class="cmd">rename</span> <span class="req">old_name</span> <span class="req">new_name</span></div>
+        <div class="codeblock"><div class="codeblock__head"><span class="codeblock__lang">.do</span></div><pre><code><span class="tok-cmd">rename</span> old_name new_name;</code></pre></div>
+      </article>
+
+      <article class="page" id="page-sort" data-screen-label="sort command">
+        <div class="crumbs"><a href="#getting-started" data-page="getting-started">docs</a><span class="sep">/</span><span class="cur">sort</span></div>
+        <h1 class="doc-h1"><span class="mono">sort</span></h1>
+        <p class="doc-lede">Sort rows by one or more columns. Default ascending.</p>
+        <div class="syntax"><span class="cmd">sort</span> <span class="req">varlist</span> [, <span class="opt">desc</span>]</div>
+        <div class="codeblock"><div class="codeblock__head"><span class="codeblock__lang">.do</span></div><pre><code><span class="tok-cmd">sort</span> year;
+<span class="tok-cmd">sort</span> revenue, <span class="tok-kw">desc</span>;
+<span class="tok-cmd">sort</span> sector year;     <span class="tok-com">// composite, both ascending</span></code></pre></div>
+      </article>
+
+      <article class="page" id="page-order" data-screen-label="order command">
+        <div class="crumbs"><a href="#getting-started" data-page="getting-started">docs</a><span class="sep">/</span><span class="cur">order</span></div>
+        <h1 class="doc-h1"><span class="mono">order</span></h1>
+        <p class="doc-lede">Reorder columns. Listed columns move to the front; everything else keeps its relative order.</p>
+        <div class="syntax"><span class="cmd">order</span> <span class="req">varlist</span></div>
+        <div class="codeblock"><div class="codeblock__head"><span class="codeblock__lang">.do</span></div><pre><code><span class="tok-cmd">order</span> year id name;</code></pre></div>
+      </article>
+
+      <article class="page" id="page-egen" data-screen-label="egen command">
+        <div class="crumbs"><a href="#getting-started" data-page="getting-started">docs</a><span class="sep">/</span><span class="cur">egen</span></div>
+        <h1 class="doc-h1"><span class="mono">egen</span></h1>
+        <p class="doc-lede">Create a column using a window or aggregate function — optionally grouped. Unlike <code>collapse</code>, the original rows survive.</p>
+        <div class="syntax"><span class="cmd">egen</span> <span class="req">newvar</span> = <span class="req">fn</span>(<span class="req">expr</span>) [, <span class="opt">by(</span><span class="req">groupvars</span><span class="opt">)</span>]</div>
+        <div class="codeblock"><div class="codeblock__head"><span class="codeblock__lang">.do</span></div><pre><code><span class="tok-cmd">egen</span> mean_rev <span class="tok-op">=</span> <span class="tok-fn">mean</span>(revenue), by(sector);
+<span class="tok-cmd">egen</span> row_num <span class="tok-op">=</span> <span class="tok-fn">seq</span>(), by(sector);
+<span class="tok-cmd">egen</span> total <span class="tok-op">=</span> <span class="tok-fn">sum</span>(revenue);</code></pre></div>
+        <p>Compiles to a <code>WINDOW</code> clause with the appropriate <code>PARTITION BY</code>.</p>
+      </article>
+
+      <article class="page" id="page-mvencode" data-screen-label="mvencode command">
+        <div class="crumbs"><a href="#getting-started" data-page="getting-started">docs</a><span class="sep">/</span><span class="cur">mvencode</span></div>
+        <h1 class="doc-h1"><span class="mono">mvencode</span></h1>
+        <p class="doc-lede">Replace missing values across one or more columns with a fill value.</p>
+        <div class="syntax"><span class="cmd">mvencode</span> <span class="req">varlist</span>, <span class="opt">mv(</span><span class="req">fill</span><span class="opt">)</span></div>
+        <div class="codeblock"><div class="codeblock__head"><span class="codeblock__lang">.do</span></div><pre><code><span class="tok-cmd">mvencode</span> revenue profit, mv(<span class="tok-num">0</span>);</code></pre></div>
+      </article>
+
+      <article class="page" id="page-reshape" data-screen-label="reshape command">
+        <div class="crumbs"><a href="#getting-started" data-page="getting-started">docs</a><span class="sep">/</span><span class="cur">reshape</span></div>
+        <h1 class="doc-h1"><span class="mono">reshape</span></h1>
+        <p class="doc-lede">Pivot the dataset between long and wide formats. <code>i()</code> is the identifier column; <code>j()</code> is the column whose values become wide columns (or vice versa).</p>
+        <div class="syntax"><span class="cmd">reshape</span> <span class="req">long | wide</span> <span class="req">stubname</span>, <span class="opt">i(</span><span class="req">id</span><span class="opt">) j(</span><span class="req">period</span><span class="opt">)</span></div>
+        <div class="codeblock"><div class="codeblock__head"><span class="codeblock__lang">.do</span></div><pre><code><span class="tok-com">// wide → long</span>
+<span class="tok-cmd">reshape</span> long revenue, i(id) j(year);
+
+<span class="tok-com">// long → wide</span>
+<span class="tok-cmd">reshape</span> wide revenue, i(id) j(year);</code></pre></div>
+        <p>Compiles to <code>PIVOT</code> / <code>UNPIVOT</code>.</p>
+      </article>
+
+      <article class="page" id="page-duplicates" data-screen-label="duplicates drop">
+        <div class="crumbs"><a href="#getting-started" data-page="getting-started">docs</a><span class="sep">/</span><span class="cur">duplicates drop</span></div>
+        <h1 class="doc-h1"><span class="mono">duplicates drop</span></h1>
+        <p class="doc-lede">Remove duplicate rows. With no arguments, considers all columns; with a varlist, only those.</p>
+        <div class="syntax"><span class="cmd">duplicates drop</span> [<span class="req">varlist</span>]</div>
+        <div class="codeblock"><div class="codeblock__head"><span class="codeblock__lang">.do</span></div><pre><code><span class="tok-cmd">duplicates drop</span>;              <span class="tok-com">// all columns</span>
+<span class="tok-cmd">duplicates drop</span> id year;      <span class="tok-com">// by specific columns</span></code></pre></div>
+      </article>
+
+      <article class="page" id="page-expand" data-screen-label="expand command">
+        <div class="crumbs"><a href="#getting-started" data-page="getting-started">docs</a><span class="sep">/</span><span class="cur">expand</span></div>
+        <h1 class="doc-h1"><span class="mono">expand</span></h1>
+        <p class="doc-lede">Replicate rows. Either a constant count or a per-row count column.</p>
+        <div class="syntax"><span class="cmd">expand</span> <span class="req">n | count_col</span> [, <span class="opt">generate(</span><span class="req">indicator</span><span class="opt">)</span>]</div>
+        <div class="codeblock"><div class="codeblock__head"><span class="codeblock__lang">.do</span></div><pre><code><span class="tok-cmd">expand</span> <span class="tok-num">3</span>;                          <span class="tok-com">// triple every row</span>
+<span class="tok-cmd">expand</span> count, generate(copy);     <span class="tok-com">// variable expansion + indicator</span></code></pre></div>
+      </article>
+
+    </main>
+
+    <!-- ===================== right TOC ===================== -->
+    <aside class="toc scroll" id="toc">
+      <div class="toc__h">on this page</div>
+      <ul id="toc-list"></ul>
+      <div class="toc__feedback">
+        <div style="color: var(--fg2); font-weight: 600;">was this helpful?</div>
+        <a href="#" onclick="return false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
+          yes, this answered it
+        </a>
+        <a href="#" onclick="return false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3z"/><path d="M17 2h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"/></svg>
+          no, i'm still stuck
+        </a>
+        <a href="#" onclick="return false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+          ask in discord
+        </a>
+      </div>
+    </aside>
+
+  </div>
+</div>
+
+<script>
+// ===========================================================
+// page routing — hash-based, switches which <article> is active
+// ===========================================================
+(function() {
+  const pages = Array.from(document.querySelectorAll('.page'));
+  const sidebarLinks = Array.from(document.querySelectorAll('[data-page]'));
+
+  function go(id) {
+    if (!id) id = 'getting-started';
+    if (!document.getElementById('page-' + id)) id = 'getting-started';
+    pages.forEach(p => p.classList.toggle('is-active', p.id === 'page-' + id));
+    sidebarLinks.forEach(a => a.classList.toggle('is-active', a.dataset.page === id));
+    rebuildToc(id);
+    // open the parent <details> if this page lives inside one
+    const link = sidebarLinks.find(a => a.dataset.page === id && a.closest('details'));
+    if (link) link.closest('details').open = true;
+    window.scrollTo({top:0, behavior: 'instant'});
+  }
+
+  function rebuildToc(id) {
+    const page = document.getElementById('page-' + id);
+    const list = document.getElementById('toc-list');
+    list.innerHTML = '';
+    if (!page) return;
+    const heads = page.querySelectorAll('h2[id], h3[id]');
+    heads.forEach(h => {
+      const li = document.createElement('li');
+      const a = document.createElement('a');
+      a.href = '#' + id;
+      a.dataset.tocTarget = h.id;
+      a.textContent = h.textContent.replace(/^[\s·]+/, '');
+      a.className = h.tagName === 'H3' ? 'lvl-3' : 'lvl-2';
+      a.onclick = (e) => {
+        e.preventDefault();
+        h.scrollIntoView({block: 'start', behavior: 'smooth'});
+      };
+      li.appendChild(a);
+      list.appendChild(li);
+    });
+    // first one active by default
+    const firstA = list.querySelector('a');
+    if (firstA) firstA.classList.add('is-active');
+  }
+
+  // intercept clicks
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest('[data-page]');
+    if (!a) return;
+    const page = a.dataset.page;
+    if (!page) return;
+    e.preventDefault();
+    location.hash = '#' + page;
+  });
+
+  // hash handler
+  window.addEventListener('hashchange', () => {
+    go(location.hash.slice(1));
+  });
+
+  // init
+  go(location.hash.slice(1));
+
+  // ===== TOC scrollspy
+  let ticking = false;
+  document.addEventListener('scroll', () => {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => {
+      const activePage = document.querySelector('.page.is-active');
+      if (!activePage) { ticking = false; return; }
+      const heads = activePage.querySelectorAll('h2[id], h3[id]');
+      const offset = 120;
+      let current = null;
+      heads.forEach(h => {
+        const r = h.getBoundingClientRect();
+        if (r.top - offset <= 0) current = h.id;
+      });
+      const tocAs = document.querySelectorAll('#toc-list a');
+      tocAs.forEach(a => a.classList.toggle('is-active', a.dataset.tocTarget === current));
+      ticking = false;
+    });
+  });
+})();
+
+// ===========================================================
+// dark mode toggle
+// ===========================================================
+(function() {
+  const root = document.documentElement;
+  const btn = document.getElementById('theme-toggle');
+  const sun = document.getElementById('theme-sun');
+  const moon = document.getElementById('theme-moon');
+  const stored = localStorage.getItem('dodo-docs-theme');
+  if (stored === 'dark') root.setAttribute('data-theme', 'dark');
+  syncIcon();
+  btn.addEventListener('click', () => {
+    const isDark = root.getAttribute('data-theme') === 'dark';
+    if (isDark) { root.removeAttribute('data-theme'); localStorage.setItem('dodo-docs-theme', 'light'); }
+    else { root.setAttribute('data-theme', 'dark'); localStorage.setItem('dodo-docs-theme', 'dark'); }
+    syncIcon();
+  });
+  function syncIcon() {
+    const isDark = root.getAttribute('data-theme') === 'dark';
+    sun.style.display = isDark ? 'none' : '';
+    moon.style.display = isDark ? '' : 'none';
+  }
+})();
+
+// ===========================================================
+// copy buttons — fake but acknowledge feedback
+// ===========================================================
+document.querySelectorAll('.codeblock__copy').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const pre = btn.closest('.codeblock').querySelector('pre');
+    const text = pre ? pre.innerText : '';
+    if (navigator.clipboard) navigator.clipboard.writeText(text).catch(()=>{});
+    const orig = btn.innerHTML;
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M20 6 9 17l-5-5"/></svg>copied';
+    setTimeout(() => { btn.innerHTML = orig; }, 1400);
+  });
+});
+</script>
+
+</body>
+</html>

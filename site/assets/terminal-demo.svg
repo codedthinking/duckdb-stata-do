@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 680" fill="none" role="img" aria-label="dodo terminal session example">
+  <title>dodo — terminal session</title>
+  <rect width="1120" height="680" fill="#F7F2E8"></rect>
+
+  
+  <rect x="48" y="48" width="1024" height="584" rx="14" fill="#1A1A1A"></rect>
+  <rect x="40" y="40" width="1024" height="584" rx="14" fill="#15130E" stroke="#1A1A1A" stroke-width="3"></rect>
+
+  
+  <rect x="40" y="40" width="1024" height="40" rx="14" fill="#1F1B12"></rect>
+  <rect x="40" y="68" width="1024" height="14" fill="#1F1B12"></rect>
+  <circle cx="68" cy="60" r="6" fill="none" stroke="#7A6F55" stroke-width="1.5"></circle>
+  <circle cx="90" cy="60" r="6" fill="none" stroke="#7A6F55" stroke-width="1.5"></circle>
+  <circle cx="112" cy="60" r="6" fill="none" stroke="#7A6F55" stroke-width="1.5"></circle>
+  <text x="552" y="64" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-weight="600" font-size="13" fill="#9C927C" letter-spacing="1">dodo · DuckDB v1.1.3</text>
+  <circle cx="1020" cy="60" r="5" fill="#D8A44C"></circle>
+  <text x="1033" y="64" font-family="JetBrains Mono, ui-monospace, monospace" font-weight="700" font-size="11" fill="#D8A44C" letter-spacing="1.5">LIVE</text>
+  <line x1="40" y1="82" x2="1064" y2="82" stroke="#2A2722" stroke-width="1"></line>
+
+  
+  <g font-family="JetBrains Mono, ui-monospace, monospace" font-size="15">
+
+    
+    <text x="64" y="116" font-weight="500" fill="#7A6F55">-- load the extension once per session</text>
+
+    
+    <text x="64" y="142" font-weight="700" fill="#D8A44C">D ›</text>
+    <text x="100" y="142" font-weight="700" fill="#E8B45A">LOAD</text>
+    <text x="150" y="142" font-weight="500" fill="#F3E7C9">dodo;</text>
+
+    
+    <text x="100" y="166" font-weight="600" fill="#7BB05A">✓ Extension loaded.</text>
+
+    
+    <text x="64" y="206" font-weight="500" fill="#7A6F55">-- run a legacy .do script — translated to a CTE chain</text>
+
+    
+    <text x="64" y="232" font-weight="700" fill="#D8A44C">D ›</text>
+    <text x="100" y="232" font-weight="700" fill="#E8B45A">SELECT</text>
+    <text x="164" y="232" font-weight="500" fill="#F3E7C9">*</text>
+    <text x="176" y="232" font-weight="700" fill="#E8B45A">FROM</text>
+    <text x="226" y="232" font-weight="500" fill="#F3E7C9">dodo_run(</text>
+    <text x="314" y="232" font-weight="500" fill="#C9A66B">&#39;clean.do&#39;</text>
+    <text x="404" y="232" font-weight="500" fill="#F3E7C9">);</text>
+
+    
+    <text x="100" y="258" font-style="italic" font-weight="500" fill="#7A6F55">building CTE chain · 12 steps · deferred</text>
+    <text x="100" y="278" font-style="italic" font-weight="500" fill="#7A6F55">terminal command found · executing ...</text>
+
+    
+    <g transform="translate(64,302)">
+      
+      <rect x="0" y="0" width="960" height="232" rx="6" fill="#15130E" stroke="#7A6F55" stroke-width="1"></rect>
+      
+      <rect x="0" y="0" width="960" height="34" fill="#2A2722"></rect>
+      <line x1="0" y1="34" x2="960" y2="34" stroke="#7A6F55" stroke-width="1"></line>
+      
+      <line x1="220" y1="0" x2="220" y2="232" stroke="#2A2722" stroke-width="1"></line>
+      <line x1="340" y1="0" x2="340" y2="232" stroke="#2A2722" stroke-width="1"></line>
+      <line x1="500" y1="0" x2="500" y2="232" stroke="#2A2722" stroke-width="1"></line>
+      <line x1="660" y1="0" x2="660" y2="232" stroke="#2A2722" stroke-width="1"></line>
+      <line x1="800" y1="0" x2="800" y2="232" stroke="#2A2722" stroke-width="1"></line>
+
+      
+      <g font-weight="700" fill="#D8A44C" font-size="12" letter-spacing="1">
+        <text x="14" y="22">firm_id</text>
+        <text x="234" y="22">year</text>
+        <text x="354" y="22">industry</text>
+        <text x="514" y="22">revenue</text>
+        <text x="674" y="22">employees</text>
+        <text x="814" y="22">ln_rev</text>
+      </g>
+
+      
+      <g font-weight="500" fill="#F3E7C9" font-size="14">
+        
+        <text x="14" y="58">FIN-0142</text>
+        <text x="234" y="58">2018</text>
+        <text x="354" y="58">Manufacturing</text>
+        <text x="514" y="58" fill="#DD9A55">8,420,000</text>
+        <text x="674" y="58" fill="#DD9A55">312</text>
+        <text x="814" y="58" fill="#DD9A55">15.946</text>
+        
+        <text x="14" y="86">FIN-0143</text>
+        <text x="234" y="86">2018</text>
+        <text x="354" y="86">Retail</text>
+        <text x="514" y="86" fill="#DD9A55">1,205,000</text>
+        <text x="674" y="86" fill="#DD9A55">48</text>
+        <text x="814" y="86" fill="#DD9A55">14.002</text>
+        
+        <text x="14" y="114">FIN-0144</text>
+        <text x="234" y="114">2018</text>
+        <text x="354" y="114">Services</text>
+        <text x="514" y="114" fill="#DD9A55">3,890,000</text>
+        <text x="674" y="114" fill="#DD9A55">127</text>
+        <text x="814" y="114" fill="#DD9A55">15.174</text>
+        
+        <text x="14" y="142">FIN-0145</text>
+        <text x="234" y="142">2018</text>
+        <text x="354" y="142">Manufacturing</text>
+        <text x="514" y="142" fill="#DD9A55">11,950,000</text>
+        <text x="674" y="142" fill="#DD9A55">419</text>
+        <text x="814" y="142" fill="#DD9A55">16.296</text>
+        
+        <text x="14" y="170">FIN-0146</text>
+        <text x="234" y="170">2018</text>
+        <text x="354" y="170">Retail</text>
+        <text x="514" y="170" fill="#DD9A55">662,400</text>
+        <text x="674" y="170" fill="#DD9A55">22</text>
+        <text x="814" y="170" fill="#DD9A55">13.404</text>
+        
+        <text x="14" y="200" fill="#7A6F55">… 24,109 more rows</text>
+      </g>
+
+      
+      <rect x="0" y="206" width="960" height="26" fill="#1F1B12"></rect>
+      <line x1="0" y1="206" x2="960" y2="206" stroke="#7A6F55" stroke-width="1"></line>
+      <text x="14" y="224" font-weight="700" fill="#D8A44C" font-size="11" letter-spacing="1">24,114 rows  ·  6 cols</text>
+      <text x="946" y="224" text-anchor="end" font-weight="600" fill="#9C927C" font-size="11">0.084s</text>
+    </g>
+
+    
+    <text x="64" y="568" font-weight="700" fill="#D8A44C">D ›</text>
+    <rect x="100" y="554" width="10" height="18" fill="#D8A44C"></rect>
+
+    
+    <text x="64" y="600" font-weight="500" fill="#7A6F55" font-size="12">Press Ctrl+D to exit · type .help for more</text>
+  </g>
+</svg>
