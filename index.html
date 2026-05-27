@@ -4,6 +4,7 @@
 <meta charset="utf-8"/>
 <title>dodo docs — run .do files in DuckDB</title>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
+<link rel="canonical" href="https://getdodo.dev"/>
 <link rel="icon" href="assets/favicon.svg"/>
 <link rel="stylesheet" href="styles/tokens.css"/>
 <style>
@@ -916,6 +917,22 @@ h1.doc-h1 .mono {
         </a>
       </div>
 
+      <div class="sidebar__group">
+        <div class="sidebar__h">dodoc compiler</div>
+        <a class="sidebar__direct" href="#dodoc-overview" data-page="dodoc-overview">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+          overview
+        </a>
+        <a class="sidebar__direct" href="#dodoc-install" data-page="dodoc-install">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          installation
+        </a>
+        <a class="sidebar__direct" href="#dodoc-usage" data-page="dodoc-usage">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M4 17l6-6-6-6M12 19h8"/></svg>
+          usage
+        </a>
+      </div>
+
     </aside>
 
     <!-- ===================== main ===================== -->
@@ -969,6 +986,11 @@ h1.doc-h1 .mono {
 <span class="tok-cmd">generate</span> profit <span class="tok-op">=</span> revenue <span class="tok-op">-</span> cost;
 <span class="tok-cmd">collapse</span> (mean) avg_profit <span class="tok-op">=</span> profit, by(sector);
 <span class="tok-cmd">list</span>;</code></pre>
+        </div>
+
+        <div class="callout">
+          <div class="callout__h"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="square"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>about semicolons</div>
+          <p>Semicolons at the end of each line are a DuckDB REPL convention — the REPL needs them to know when a statement ends. Inside <code>.do</code> files, each line is one statement and <strong>no semicolons are needed</strong>.</p>
         </div>
 
         <p>Run the same script as a single command from the shell:</p>
@@ -1026,6 +1048,7 @@ h1.doc-h1 .mono {
           <li>Run an existing <code>.do</code> file with the <a href="#do" data-page="do" style="color:var(--accent-deep);font-weight:600;">do</a> command.</li>
           <li>If you wrote SQL by hand before, skim <a href="#expressions" data-page="expressions" style="color:var(--accent-deep);font-weight:600;">expression translation</a> to learn the cheat-sheet between <code>missing(x)</code> and <code>x IS NULL</code>.</li>
           <li>Hook the DuckDB UI into a live view so every step shows up in the data panel.</li>
+          <li>Don't want to install DuckDB? Use <a href="#dodoc-overview" data-page="dodoc-overview" style="color:var(--accent-deep);font-weight:600;">dodoc</a> to compile <code>.do</code> files to SQL as a standalone CLI — then pipe the output into any database.</li>
         </ul>
 
         <div class="pagefoot">
@@ -1050,7 +1073,7 @@ h1.doc-h1 .mono {
         </div>
 
         <h1 class="doc-h1">Installation</h1>
-        <p class="doc-lede">Two ways to get dodo: from the DuckDB community extension repository (recommended), or from source if you want to track <code>main</code>.</p>
+        <p class="doc-lede">Two ways to get the dodo DuckDB extension: from the community extension repository (recommended), or from source. Looking for the standalone compiler? See <a href="#dodoc-install" data-page="dodoc-install" style="color:var(--accent-deep);font-weight:600;">dodoc installation</a>.</p>
 
         <h2 id="i-extension">from the duckdb extension repo</h2>
         <p>This is the path you want for almost any normal use. Works in the DuckDB CLI, the DuckDB UI, and every client library (Python, R, Java, Node, Rust).</p>
@@ -1105,6 +1128,9 @@ h1.doc-h1 .mono {
           <div class="callout__h"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="square"><path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/></svg>duckdb version</div>
           <p>dodo requires <strong>DuckDB ≥ 0.10.2</strong>. Older builds don't carry the extension entrypoint dodo uses to register its statements. Run <code>SELECT version();</code> if you're unsure.</p>
         </div>
+
+        <h2 id="i-dodoc">standalone compiler (dodoc)</h2>
+        <p>If you only need to translate <code>.do</code> files to SQL — without running them in DuckDB — the <a href="#dodoc-overview" data-page="dodoc-overview" style="color:var(--accent-deep);font-weight:600;">dodoc</a> standalone compiler is a single binary with no dependencies. See the <a href="#dodoc-install" data-page="dodoc-install" style="color:var(--accent-deep);font-weight:600;">dodoc installation</a> page for download links and build instructions.</p>
 
         <div class="pagefoot">
           <a class="pagefoot__nav" href="#getting-started" data-page="getting-started">
@@ -1909,6 +1935,226 @@ _sN <span class="tok-kw">AS</span> (
         <div class="syntax"><span class="cmd">expand</span> <span class="req">n | count_col</span> [, <span class="opt">generate(</span><span class="req">indicator</span><span class="opt">)</span>]</div>
         <div class="codeblock"><div class="codeblock__head"><span class="codeblock__lang">.do</span></div><pre><code><span class="tok-cmd">expand</span> <span class="tok-num">3</span>;                          <span class="tok-com">// triple every row</span>
 <span class="tok-cmd">expand</span> count, generate(copy);     <span class="tok-com">// variable expansion + indicator</span></code></pre></div>
+      </article>
+
+      <!-- ---------- page: dodoc-overview ---------- -->
+      <article class="page" id="page-dodoc-overview" data-screen-label="dodoc overview">
+        <div class="crumbs">
+          <a href="#getting-started" data-page="getting-started">docs</a>
+          <span class="sep">/</span>
+          <a href="#" onclick="return false">dodoc</a>
+          <span class="sep">/</span>
+          <span class="cur">overview</span>
+        </div>
+
+        <h1 class="doc-h1"><span class="mono">dodoc</span> standalone compiler</h1>
+        <p class="doc-lede">Compile <code>.do</code> files to SQL without installing DuckDB. A single binary, no dependencies, designed for CI/CD pipelines and SQL preview workflows.</p>
+
+        <h2 id="dc-what">what is dodoc?</h2>
+        <p><code>dodoc</code> is a standalone CLI that reads <code>.do</code> files and outputs the equivalent SQL — the same translation the dodo DuckDB extension performs, but without needing DuckDB at all.</p>
+        <p>It shares the same core parser as the <a href="#install" data-page="install" style="color:var(--accent-deep);font-weight:600;">dodo extension</a>, so every command the extension understands, dodoc understands too.</p>
+
+        <h2 id="dc-why">why use it?</h2>
+        <ul>
+          <li><strong>No DuckDB dependency</strong> — useful in environments where you can't install DuckDB (locked-down CI runners, lightweight containers).</li>
+          <li><strong>Preview SQL before running</strong> — pipe the output to a file, inspect it, then feed it to DuckDB (or another database) only when you're ready.</li>
+          <li><strong>CI/CD integration</strong> — compile <code>.do</code> files as a build step, validate the SQL, commit the output.</li>
+          <li><strong>Pipe-friendly</strong> — reads from stdin, writes to stdout, composes with Unix tools.</li>
+        </ul>
+
+        <h2 id="dc-relation">relation to the dodo extension</h2>
+        <div class="callout">
+          <div class="callout__h"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="square"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>two tools, one parser</div>
+          <p>The <strong>dodo extension</strong> runs inside DuckDB and executes the translated SQL immediately. <strong>dodoc</strong> runs outside DuckDB and only produces SQL text. Both share the same parser and produce identical SQL for the same input.</p>
+        </div>
+
+        <div class="pagefoot">
+          <a class="pagefoot__nav next" href="#dodoc-install" data-page="dodoc-install">
+            <span class="dir">next →</span>
+            <span class="ttl">dodoc installation</span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ---------- page: dodoc-install ---------- -->
+      <article class="page" id="page-dodoc-install" data-screen-label="dodoc installation">
+        <div class="crumbs">
+          <a href="#getting-started" data-page="getting-started">docs</a>
+          <span class="sep">/</span>
+          <a href="#" onclick="return false">dodoc</a>
+          <span class="sep">/</span>
+          <span class="cur">installation</span>
+        </div>
+
+        <h1 class="doc-h1">Install <span class="mono">dodoc</span></h1>
+        <p class="doc-lede">Download a pre-built binary for your platform, or build from source.</p>
+
+        <h2 id="dci-download">download pre-built binaries</h2>
+        <p>Pre-built binaries are available on the <a href="https://github.com/codedthinking/dodo/releases" target="_blank" rel="noopener" style="color:var(--accent-deep);font-weight:600;">GitHub Releases</a> page for three platforms:</p>
+
+        <div class="cmd-grid">
+          <a class="cmd-card" href="https://github.com/codedthinking/dodo/releases" target="_blank" rel="noopener">
+            <div class="cmd-card__name">macOS arm64</div>
+            <div class="cmd-card__desc">Apple Silicon (M1/M2/M3/M4). Download <code>dodoc-macos-arm64.tar.gz</code>.</div>
+          </a>
+          <a class="cmd-card" href="https://github.com/codedthinking/dodo/releases" target="_blank" rel="noopener">
+            <div class="cmd-card__name">macOS x86_64</div>
+            <div class="cmd-card__desc">Intel Macs. Download <code>dodoc-macos-x86_64.tar.gz</code>.</div>
+          </a>
+          <a class="cmd-card" href="https://github.com/codedthinking/dodo/releases" target="_blank" rel="noopener">
+            <div class="cmd-card__name">Windows x86_64</div>
+            <div class="cmd-card__desc">64-bit Windows. Download <code>dodoc-windows-x86_64.zip</code>.</div>
+          </a>
+        </div>
+
+        <p>After downloading, extract and install:</p>
+
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">bash</span>
+            <span class="codeblock__title">// macOS / Linux</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-prompt">›</span> tar xzf dodoc-macos-arm64.tar.gz
+<span class="tok-prompt">›</span> sudo install dodoc /usr/local/bin/</code></pre>
+        </div>
+
+        <h2 id="dci-source">build from source</h2>
+        <p>Requires <code>git</code>, <code>make</code>, and a C++17 compiler.</p>
+
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">bash</span>
+            <span class="codeblock__title">// clone and build</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-prompt">›</span> git clone --recurse-submodules https://github.com/codedthinking/dodo.git
+<span class="tok-prompt">›</span> <span class="tok-cmd">cd</span> dodo
+<span class="tok-prompt">›</span> <span class="tok-cmd">make</span> dodoc
+<span class="tok-prompt">›</span> sudo <span class="tok-cmd">make</span> dodoc-install</code></pre>
+        </div>
+
+        <p>This installs the <code>dodoc</code> binary to <code>/usr/local/bin/</code>.</p>
+
+        <h2 id="dci-verify">verify</h2>
+
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">bash</span>
+            <span class="codeblock__title">// check it works</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-prompt">›</span> dodoc --help</code></pre>
+        </div>
+
+        <div class="pagefoot">
+          <a class="pagefoot__nav" href="#dodoc-overview" data-page="dodoc-overview">
+            <span class="dir">← previous</span>
+            <span class="ttl">dodoc overview</span>
+          </a>
+          <a class="pagefoot__nav next" href="#dodoc-usage" data-page="dodoc-usage">
+            <span class="dir">next →</span>
+            <span class="ttl">dodoc usage</span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ---------- page: dodoc-usage ---------- -->
+      <article class="page" id="page-dodoc-usage" data-screen-label="dodoc usage">
+        <div class="crumbs">
+          <a href="#getting-started" data-page="getting-started">docs</a>
+          <span class="sep">/</span>
+          <a href="#" onclick="return false">dodoc</a>
+          <span class="sep">/</span>
+          <span class="cur">usage</span>
+        </div>
+
+        <h1 class="doc-h1">Using <span class="mono">dodoc</span></h1>
+        <p class="doc-lede">Read from stdin or file, output SQL to stdout or file. Pipe into DuckDB or save for later.</p>
+
+        <h2 id="dcu-stdin">stdin to stdout</h2>
+        <p>Pipe <code>.do</code> commands directly:</p>
+
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">bash</span>
+            <span class="codeblock__title">// pipe from echo</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-prompt">›</span> echo 'use "data.csv", clear
+keep if year &gt;= 2020
+generate profit = revenue - cost' | dodoc</code></pre>
+        </div>
+
+        <h2 id="dcu-file">compile a file</h2>
+        <p>Pass the <code>.do</code> file as an argument:</p>
+
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">bash</span>
+            <span class="codeblock__title">// file to stdout</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-prompt">›</span> dodoc analysis/clean.do</code></pre>
+        </div>
+
+        <p>Write to a file with <code>-o</code>:</p>
+
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">bash</span>
+            <span class="codeblock__title">// file to file</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-prompt">›</span> dodoc analysis/clean.do -o analysis/clean.sql</code></pre>
+        </div>
+
+        <h2 id="dcu-annotate">annotated output</h2>
+        <p>The <code>--annotate</code> flag adds the original <code>.do</code> command as a SQL comment above each translated statement, making the output easier to read and debug:</p>
+
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">bash</span>
+            <span class="codeblock__title">// annotated SQL output</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-prompt">›</span> dodoc --annotate analysis/clean.do</code></pre>
+        </div>
+
+        <h2 id="dcu-pipe">piping to duckdb</h2>
+        <p>The most common pattern: compile, then execute. Pipe dodoc output directly into DuckDB:</p>
+
+        <div class="codeblock">
+          <div class="codeblock__head">
+            <span class="codeblock__lang">bash</span>
+            <span class="codeblock__title">// compile and run in one step</span>
+            <button class="codeblock__copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>copy</button>
+          </div>
+<pre><code><span class="tok-prompt">›</span> dodoc script.do | duckdb</code></pre>
+        </div>
+
+        <div class="callout">
+          <div class="callout__h"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="square"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>dodoc vs dodo extension</div>
+          <p>When piping to DuckDB this way, DuckDB does <strong>not</strong> need the dodo extension installed — it receives plain SQL. The extension is only needed when you type <code>.do</code> commands directly in the DuckDB REPL.</p>
+        </div>
+
+        <h2 id="dcu-flags">all flags</h2>
+        <table style="width:100%; font-size:14px;">
+          <thead><tr><th style="text-align:left; padding:8px 12px; border-bottom:var(--bw-2) solid var(--line);">Flag</th><th style="text-align:left; padding:8px 12px; border-bottom:var(--bw-2) solid var(--line);">Description</th></tr></thead>
+          <tbody>
+            <tr><td style="padding:8px 12px; border-bottom:var(--bw-1) solid var(--line-soft);"><code>-o, --output FILE</code></td><td style="padding:8px 12px; border-bottom:var(--bw-1) solid var(--line-soft);">Write SQL to FILE instead of stdout</td></tr>
+            <tr><td style="padding:8px 12px; border-bottom:var(--bw-1) solid var(--line-soft);"><code>--annotate</code></td><td style="padding:8px 12px; border-bottom:var(--bw-1) solid var(--line-soft);">Emit original .do command as a SQL comment before each statement</td></tr>
+            <tr><td style="padding:8px 12px; border-bottom:var(--bw-1) solid var(--line-soft);"><code>--terminal</code></td><td style="padding:8px 12px; border-bottom:var(--bw-1) solid var(--line-soft);">Also emit SQL for terminal commands (list, count, etc.)</td></tr>
+            <tr><td style="padding:8px 12px;"><code>-h, --help</code></td><td style="padding:8px 12px;">Show help message</td></tr>
+          </tbody>
+        </table>
+
+        <div class="pagefoot">
+          <a class="pagefoot__nav" href="#dodoc-install" data-page="dodoc-install">
+            <span class="dir">← previous</span>
+            <span class="ttl">dodoc installation</span>
+          </a>
+        </div>
       </article>
 
     </main>
