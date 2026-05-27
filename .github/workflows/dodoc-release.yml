@@ -1,0 +1,116 @@
+name: dodoc Release
+
+on:
+  push:
+    tags:
+      - 'dodoc-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-unix:
+    name: Build dodoc (${{ matrix.os }}-${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - os: macos
+            arch: arm64
+            runner: macos-14
+            artifact: dodoc-macos-arm64
+          - os: macos
+            arch: x86_64
+            runner: macos-13
+            artifact: dodoc-macos-x86_64
+          - os: linux
+            arch: x86_64
+            runner: ubuntu-22.04
+            artifact: dodoc-linux-x86_64
+            static: true
+          - os: linux
+            arch: arm64
+            runner: ubuntu-22.04-arm
+            artifact: dodoc-linux-arm64
+            static: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build dodoc
+        run: |
+          CXXFLAGS="-O2 -std=c++17"
+          if [ "${{ matrix.static }}" = "true" ]; then
+            CXXFLAGS="$CXXFLAGS -static"
+          fi
+          mkdir -p build/dodoc
+          c++ $CXXFLAGS -Isrc/core -o build/dodoc/dodoc src/cli/dodoc.cpp src/core/dodo_core.cpp
+          strip build/dodoc/dodoc || true
+
+      - name: Smoke test
+        run: |
+          echo 'use "data.csv", clear' | build/dodoc/dodoc
+          build/dodoc/dodoc --help
+
+      - name: Package
+        run: |
+          cd build/dodoc
+          tar czf ../../${{ matrix.artifact }}.tar.gz dodoc
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.tar.gz
+
+  build-windows:
+    name: Build dodoc (windows-x86_64)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build dodoc
+        run: |
+          mkdir build\dodoc
+          cl /O2 /EHsc /std:c++17 /MT /Isrc\core /Fe:build\dodoc\dodoc.exe src\cli\dodoc.cpp src\core\dodo_core.cpp
+        shell: cmd
+
+      - name: Smoke test
+        run: |
+          echo use "data.csv", clear | build\dodoc\dodoc.exe
+          build\dodoc\dodoc.exe --help
+        shell: cmd
+
+      - name: Package
+        run: Compress-Archive -Path build\dodoc\dodoc.exe -DestinationPath dodoc-windows-x86_64.zip
+        shell: pwsh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dodoc-windows-x86_64
+          path: dodoc-windows-x86_64.zip
+
+  release:
+    name: Create Release
+    needs: [build-unix, build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/**/*.tar.gz
+            artifacts/**/*.zip
+          generate_release_notes: true

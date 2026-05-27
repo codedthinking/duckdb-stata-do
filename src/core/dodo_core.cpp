@@ -1,40 +1,36 @@
-#define DUCKDB_EXTENSION_MAIN
-
-#include "dodo_extension.hpp"
-#include "duckdb.hpp"
-#include "duckdb/common/exception.hpp"
-#include "duckdb/common/string_util.hpp"
-#include "duckdb/main/client_context.hpp"
-#include "duckdb/parser/parser.hpp"
-#include "duckdb/planner/binder.hpp"
-
-#include "duckdb/parser/keyword_helper.hpp"
+#include "dodo_core.hpp"
 
 #include <fstream>
 #include <regex>
 
-namespace duckdb {
+namespace dodo {
 
-// Global pointer to shared state, used by the live_view option callback
-static DodoStateInfo *g_dodo_state = nullptr;
+using std::string;
+using std::vector;
+using std::unordered_map;
+using std::unordered_set;
+using std::pair;
+using std::to_string;
 
 // Helper: Trim that returns a new string
 static string Trim(const string &s) {
 	string result = s;
-	StringUtil::Trim(result);
+	str::Trim(result);
 	return result;
 }
 
 // Helper: quote an identifier if it's a SQL keyword or needs quoting
 static string QuoteIdent(const string &s) {
-	return KeywordHelper::WriteOptionallyQuoted(s);
+	return str::QuoteIdent(s);
 }
+
+
 
 //===--------------------------------------------------------------------===//
 // Command Tokenizer
 //===--------------------------------------------------------------------===//
 
-static const vector<string> DODO_COMMANDS = {"use",       "list",       "clear",   "keep",    "drop",
+const vector<string> DODO_COMMANDS = {"use",       "list",       "clear",   "keep",    "drop",
                                               "generate",  "replace",    "rename",  "sort",    "order",
                                               "egen",      "collapse",   "count",   "describe", "summarize",
                                               "tabulate",  "head",       "tail",    "save",    "append",
@@ -48,7 +44,7 @@ static const vector<string> DODO_COMMANDS = {"use",       "list",       "clear",
 // Transformation: modifies the CTE chain state
 // Terminal: materializes the chain, returns the data frame
 // Side-effect: returns a derived result (count, stats, freq table, file write)
-static bool IsTransformationCommand(const string &command) {
+bool IsTransformationCommand(const string &command) {
 	static const vector<string> TRANSFORMATION = {"use", "clear", "do", "keep", "drop", "generate", "replace",
 	                                              "rename", "sort", "order", "egen", "collapse", "mvencode",
 	                                              "reshape", "append", "label", "duplicates", "expand", "import",
@@ -64,73 +60,21 @@ static bool IsTransformationCommand(const string &command) {
 }
 
 // Side-effect commands that produce SQL beyond state updates — must be executed in do-files
-static bool IsSideEffectCommand(const string &command) {
+bool IsSideEffectCommand(const string &command) {
 	return command == "export" || command == "save";
 }
 
-// Build SQL to recreate dodo._history table from in-memory state
-static string BuildHistorySQL(const DodoStateInfo &state) {
-	if (!state.materialized) {
-		return "";
-	}
-	string sql = "CREATE OR REPLACE TABLE dodo._history AS SELECT * FROM (VALUES ";
-	bool first = true;
-	// Active steps
-	for (idx_t i = 0; i < state.cte_commands.size(); i++) {
-		if (!first) {
-			sql += ", ";
-		}
-		string escaped_cmd = state.cte_commands[i];
-		// Escape single quotes
-		size_t pos = 0;
-		while ((pos = escaped_cmd.find('\'', pos)) != string::npos) {
-			escaped_cmd.replace(pos, 1, "''");
-			pos += 2;
-		}
-		sql += "(" + to_string(i) + ", '" + escaped_cmd + "', false)";
-		first = false;
-	}
-	// Undone steps (redo stack, in reverse order so most recently undone has highest step_id)
-	for (idx_t i = 0; i < state.redo_stack.size(); i++) {
-		if (!first) {
-			sql += ", ";
-		}
-		string escaped_cmd = state.redo_stack[state.redo_stack.size() - 1 - i].first;
-		size_t pos = 0;
-		while ((pos = escaped_cmd.find('\'', pos)) != string::npos) {
-			escaped_cmd.replace(pos, 1, "''");
-			pos += 2;
-		}
-		int step_id = static_cast<int>(state.cte_commands.size()) + static_cast<int>(i);
-		sql += "(" + to_string(step_id) + ", '" + escaped_cmd + "', true)";
-		first = false;
-	}
-	if (first) {
-		// No steps at all — create empty table
-		return "CREATE OR REPLACE TABLE dodo._history (step_id INTEGER, command VARCHAR, undone BOOLEAN)";
-	}
-	sql += ") AS t(step_id, command, undone)";
-	return sql;
-}
 
-// Build SQL to create/replace the live view for UI integration
-static string BuildLiveViewSQL(const DodoStateInfo &state) {
-	if (!state.live_view_enabled || !state.HasData()) {
-		return "";
-	}
-	return "CREATE OR REPLACE VIEW _dodo_data AS (" +
-	       state.BuildQuery("SELECT * FROM " + state.LatestStep()) + ")";
-}
 
-static bool IsDodoCommand(const string &query, string &command_out) {
+bool IsDodoCommand(const string &query, string &command_out) {
 	string trimmed = Trim(query);
 	if (!trimmed.empty() && trimmed.back() == ';') {
 		trimmed.pop_back();
 		trimmed = Trim(trimmed);
 	}
-	string lower = StringUtil::Lower(trimmed);
+	string lower = str::Lower(trimmed);
 	for (auto &cmd : DODO_COMMANDS) {
-		if (StringUtil::StartsWith(lower, cmd)) {
+		if (str::StartsWith(lower, cmd)) {
 			if (lower.size() == cmd.size() || lower[cmd.size()] == ' ' || lower[cmd.size()] == ',') {
 				command_out = cmd;
 				return true;
@@ -140,17 +84,9 @@ static bool IsDodoCommand(const string &query, string &command_out) {
 	return false;
 }
 
-struct DodoCommand {
-	string command;
-	string arguments;
-	string condition;
-	string options;
-	// bysort context (set when command has bysort/by prefix)
-	string bysort_partition;  // PARTITION BY vars (comma-separated)
-	string bysort_order;      // ORDER BY vars (comma-separated), empty if none
-};
 
-static DodoCommand TokenizeCommand(const string &query) {
+
+DodoCommand TokenizeCommand(const string &query) {
 	DodoCommand result;
 	string trimmed = Trim(query);
 	if (!trimmed.empty() && trimmed.back() == ';') {
@@ -158,9 +94,9 @@ static DodoCommand TokenizeCommand(const string &query) {
 		trimmed = Trim(trimmed);
 	}
 
-	string lower = StringUtil::Lower(trimmed);
+	string lower = str::Lower(trimmed);
 	for (auto &cmd : DODO_COMMANDS) {
-		if (StringUtil::StartsWith(lower, cmd) &&
+		if (str::StartsWith(lower, cmd) &&
 		    (lower.size() == cmd.size() || lower[cmd.size()] == ' ' || lower[cmd.size()] == ',')) {
 			result.command = cmd;
 			trimmed = Trim(trimmed.substr(cmd.size()));
@@ -195,12 +131,12 @@ static DodoCommand TokenizeCommand(const string &query) {
 	}
 
 	// Split on "if " keyword (at start or after space, not inside quotes)
-	string lower_bc = StringUtil::Lower(before_comma);
+	string lower_bc = str::Lower(before_comma);
 	idx_t if_pos = string::npos;
 	idx_t cond_start = string::npos;
 
 	// Check if it starts with "if "
-	if (StringUtil::StartsWith(lower_bc, "if ")) {
+	if (str::StartsWith(lower_bc, "if ")) {
 		if_pos = 0;
 		cond_start = 3;
 	} else {
@@ -240,7 +176,7 @@ static DodoCommand TokenizeCommand(const string &query) {
 // SQL Generation Helpers
 //===--------------------------------------------------------------------===//
 
-static string ExtractQuotedString(const string &s) {
+string ExtractQuotedString(const string &s) {
 	string trimmed = Trim(s);
 	if (trimmed.size() >= 2) {
 		if ((trimmed.front() == '"' && trimmed.back() == '"') ||
@@ -251,23 +187,23 @@ static string ExtractQuotedString(const string &s) {
 	return trimmed;
 }
 
-static string FileReadFunction(const string &filename) {
-	string lower = StringUtil::Lower(filename);
-	if (StringUtil::EndsWith(lower, ".csv")) {
+string FileReadFunction(const string &filename) {
+	string lower = str::Lower(filename);
+	if (str::EndsWith(lower, ".csv")) {
 		return "read_csv('" + filename + "')";
-	} else if (StringUtil::EndsWith(lower, ".parquet")) {
+	} else if (str::EndsWith(lower, ".parquet")) {
 		return "read_parquet('" + filename + "')";
-	} else if (StringUtil::EndsWith(lower, ".dta")) {
+	} else if (str::EndsWith(lower, ".dta")) {
 		return "st_read('" + filename + "')";
-	} else if (StringUtil::EndsWith(lower, ".json")) {
+	} else if (str::EndsWith(lower, ".json")) {
 		return "read_json('" + filename + "')";
 	}
 	return filename;
 }
 
 // Parse by(var1, var2) from options string. Returns comma-separated var list or empty.
-static string ParseByOption(const string &options) {
-	string lower = StringUtil::Lower(options);
+string ParseByOption(const string &options) {
+	string lower = str::Lower(options);
 	// Find by(...)
 	idx_t pos = lower.find("by(");
 	if (pos == string::npos) {
@@ -276,13 +212,13 @@ static string ParseByOption(const string &options) {
 	idx_t start = pos + 3;
 	idx_t end = options.find(')', start);
 	if (end == string::npos) {
-		throw ParserException("Unmatched parenthesis in by() option");
+		throw DodoException("Unmatched parenthesis in by() option");
 	}
 	string by_content = Trim(options.substr(start, end - start));
 	// by() content may be space-separated or comma-separated; normalize to comma-separated
 	// Quote each variable name to handle SQL keyword conflicts
 	if (by_content.find(',') == string::npos) {
-		auto vars = StringUtil::Split(by_content, ' ');
+		auto vars = str::Split(by_content, ' ');
 		string result;
 		for (idx_t i = 0; i < vars.size(); i++) {
 			if (i > 0) {
@@ -293,7 +229,7 @@ static string ParseByOption(const string &options) {
 		return result;
 	}
 	// Comma-separated: quote each part
-	auto vars = StringUtil::Split(by_content, ',');
+	auto vars = str::Split(by_content, ',');
 	string result;
 	for (idx_t i = 0; i < vars.size(); i++) {
 		if (i > 0) {
@@ -305,8 +241,8 @@ static string ParseByOption(const string &options) {
 }
 
 // Map aggregate function names to SQL equivalents
-static string TranslateAggFunction(const string &func_name) {
-	string lower = StringUtil::Lower(func_name);
+string TranslateAggFunction(const string &func_name) {
+	string lower = str::Lower(func_name);
 	if (lower == "mean") return "AVG";
 	if (lower == "sd") return "STDDEV";
 	if (lower == "count") return "COUNT";
@@ -320,7 +256,7 @@ static string TranslateAggFunction(const string &func_name) {
 }
 
 // Parse a function call like "mean(x)" into {func_name, arg}
-static bool ParseFunctionCall(const string &expr, string &func_name, string &arg) {
+bool ParseFunctionCall(const string &expr, string &func_name, string &arg) {
 	idx_t paren = expr.find('(');
 	if (paren == string::npos) {
 		return false;
@@ -335,14 +271,14 @@ static bool ParseFunctionCall(const string &expr, string &func_name, string &arg
 }
 
 // Check if expression contains _n, _N, L., F., or D. (which expand to window functions)
-static bool ExpressionUsesWindowFunctions(const string &expr) {
+bool ExpressionUsesWindowFunctions(const string &expr) {
 	std::regex window_re("\\b(_[nN]\\b|[LFD]\\d*\\.)");
 	return std::regex_search(expr, window_re);
 }
 
 // Translate a cond(test, a, b) call to CASE WHEN test THEN a ELSE b END
 // Handles nested parentheses in arguments
-static string TranslateCond(const string &args) {
+string TranslateCond(const string &args) {
 	// Split on commas, respecting parentheses
 	int depth = 0;
 	vector<string> parts;
@@ -362,13 +298,13 @@ static string TranslateCond(const string &args) {
 	}
 	parts.push_back(Trim(current));
 	if (parts.size() != 3) {
-		throw ParserException("cond() requires exactly 3 arguments: cond(test, true_val, false_val)");
+		throw DodoException("cond() requires exactly 3 arguments: cond(test, true_val, false_val)");
 	}
 	return "CASE WHEN " + parts[0] + " THEN " + parts[1] + " ELSE " + parts[2] + " END";
 }
 
 // Translate inrange(x, lo, hi) to (x BETWEEN lo AND hi)
-static string TranslateInrange(const string &args) {
+string TranslateInrange(const string &args) {
 	int depth = 0;
 	vector<string> parts;
 	string current;
@@ -387,13 +323,13 @@ static string TranslateInrange(const string &args) {
 	}
 	parts.push_back(Trim(current));
 	if (parts.size() != 3) {
-		throw ParserException("inrange() requires exactly 3 arguments: inrange(x, lo, hi)");
+		throw DodoException("inrange() requires exactly 3 arguments: inrange(x, lo, hi)");
 	}
 	return "(" + parts[0] + " BETWEEN " + parts[1] + " AND " + parts[2] + ")";
 }
 
 // Translate inlist(x, a, b, c, ...) to (x IN (a, b, c, ...))
-static string TranslateInlist(const string &args) {
+string TranslateInlist(const string &args) {
 	int depth = 0;
 	vector<string> parts;
 	string current;
@@ -412,7 +348,7 @@ static string TranslateInlist(const string &args) {
 	}
 	parts.push_back(Trim(current));
 	if (parts.size() < 2) {
-		throw ParserException("inlist() requires at least 2 arguments: inlist(x, val1, ...)");
+		throw DodoException("inlist() requires at least 2 arguments: inlist(x, val1, ...)");
 	}
 	string x = parts[0];
 	string vals;
@@ -427,7 +363,7 @@ static string TranslateInlist(const string &args) {
 
 // Extract the arguments of a function call: find matching parens for func_name(...)
 // Returns the position after the closing paren, or string::npos if not found
-static idx_t FindFunctionArgs(const string &s, idx_t open_paren, string &args_out) {
+idx_t FindFunctionArgs(const string &s, idx_t open_paren, string &args_out) {
 	int depth = 1;
 	idx_t i = open_paren + 1;
 	while (i < s.size() && depth > 0) {
@@ -445,9 +381,9 @@ static idx_t FindFunctionArgs(const string &s, idx_t open_paren, string &args_ou
 	return i;
 }
 
-static string TranslateExpression(const string &expr, const string &by_cols = "",
-                                  const string &panel_var = "", const string &time_var = "",
-                                  const string &bysort_order = "") {
+string TranslateExpression(const string &expr, const string &by_cols,
+                                  const string &panel_var, const string &time_var,
+                                  const string &bysort_order) {
 	string result = expr;
 
 	// missing(x) -> (x IS NULL) — must be done BEFORE L./F./D. so that
@@ -710,7 +646,7 @@ static string TranslateExpression(const string &expr, const string &by_cols = ""
 //===--------------------------------------------------------------------===//
 // Process command: update state, return SQL
 //===--------------------------------------------------------------------===//
-static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
+string ProcessCommand(const DodoCommand &cmd, DodoState &state) {
 	// Helper: translate expression with panel/time and bysort context
 	auto TrExpr = [&state, &cmd](const string &expr, const string &by_cols = "") {
 		// bysort context overrides by_cols for _n, _N, [_n-1] etc.
@@ -736,7 +672,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 		// Find the colon separator
 		idx_t colon_pos = rest.find(':');
 		if (colon_pos == string::npos) {
-			throw ParserException("'bysort'/'by' requires a colon: bysort vars: command");
+			throw DodoException("'bysort'/'by' requires a colon: bysort vars: command");
 		}
 		string prefix_part = Trim(rest.substr(0, colon_pos));
 		string inner_cmd_str = Trim(rest.substr(colon_pos + 1));
@@ -755,7 +691,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 		}
 
 		// Convert space-separated to comma-separated
-		auto gvars = StringUtil::Split(group_vars_str, ' ');
+		auto gvars = str::Split(group_vars_str, ' ');
 		string partition_cols;
 		for (idx_t i = 0; i < gvars.size(); i++) {
 			if (i > 0) {
@@ -765,7 +701,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 		}
 		string order_cols;
 		if (!sort_vars_str.empty()) {
-			auto svars = StringUtil::Split(sort_vars_str, ' ');
+			auto svars = str::Split(sort_vars_str, ' ');
 			for (idx_t i = 0; i < svars.size(); i++) {
 				if (i > 0) {
 					order_cols += ", ";
@@ -797,7 +733,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 		state.pending_command = saved_cmd;
 		string source = ExtractQuotedString(cmd.arguments);
 		string read_expr = FileReadFunction(source);
-		string lower_opts = StringUtil::Lower(cmd.options);
+		string lower_opts = str::Lower(cmd.options);
 		bool lazy = (lower_opts.find("lazy") != string::npos);
 		bool is_file = (read_expr != source);
 
@@ -834,7 +770,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 
 	if (cmd.command == "tempfile") {
 		// tempfile name — register a tempfile identifier and ensure schema exists
-		auto names = StringUtil::Split(cmd.arguments, ' ');
+		auto names = str::Split(cmd.arguments, ' ');
 		for (auto &n : names) {
 			string name = Trim(n);
 			if (!name.empty()) {
@@ -850,7 +786,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 
 	if (cmd.command == "preserve") {
 		if (state.preserve_checkpoint >= 0) {
-			throw ParserException("'preserve' called while already preserved. Use 'restore' first.");
+			throw DodoException("'preserve' called while already preserved. Use 'restore' first.");
 		}
 		state.preserve_checkpoint = static_cast<int>(state.cte_steps.size());
 		state.preserve_step_counter = state.step_counter;
@@ -859,7 +795,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 
 	if (cmd.command == "restore") {
 		if (state.preserve_checkpoint < 0) {
-			throw ParserException("'restore' called without a prior 'preserve'.");
+			throw DodoException("'restore' called without a prior 'preserve'.");
 		}
 		// Truncate CTE chain back to the checkpoint
 		state.cte_steps.resize(state.preserve_checkpoint);
@@ -873,7 +809,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 
 	if (cmd.command == "undo") {
 		if (state.cte_steps.size() <= 1) {
-			throw ParserException("Nothing to undo.");
+			throw DodoException("Nothing to undo.");
 		}
 		int n = 1;
 		if (!cmd.arguments.empty()) {
@@ -891,17 +827,12 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 			state.cte_commands.pop_back();
 			state.step_counter--;
 		}
-		string result = BuildHistorySQL(state);
-		if (!result.empty()) {
-			result += "; ";
-		}
-		result += "SELECT 'OK' AS status";
-		return result;
+		return "SELECT 'OK' AS status";
 	}
 
 	if (cmd.command == "redo") {
 		if (state.redo_stack.empty()) {
-			throw ParserException("Nothing to redo.");
+			throw DodoException("Nothing to redo.");
 		}
 		int n = 1;
 		if (!cmd.arguments.empty()) {
@@ -918,19 +849,14 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 			state.step_counter++;
 			state.redo_stack.pop_back();
 		}
-		string result = BuildHistorySQL(state);
-		if (!result.empty()) {
-			result += "; ";
-		}
-		result += "SELECT 'OK' AS status";
-		return result;
+		return "SELECT 'OK' AS status";
 	}
 
 	if (cmd.command == "xtset" || cmd.command == "tsset") {
 		// xtset panelvar timevar  OR  tsset timevar  OR  tsset panelvar timevar
-		auto vars = StringUtil::Split(cmd.arguments, ' ');
+		auto vars = str::Split(cmd.arguments, ' ');
 		if (vars.empty()) {
-			throw ParserException("'%s' requires at least a time variable", cmd.command);
+			throw DodoException("'" + cmd.command + "' requires at least a time variable");
 		}
 		if (vars.size() == 1) {
 			// tsset timevar (pure time-series, no panel var)
@@ -945,123 +871,8 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 	}
 
 	if (cmd.command == "do") {
-		// do "script.do" — read and execute a .do file line by line
 		string filename = ExtractQuotedString(cmd.arguments);
-		std::ifstream file(filename);
-		if (!file.is_open()) {
-			throw ParserException("Cannot open file: %s", filename);
-		}
-
-		string line;
-		bool in_block_comment = false;
-		string continued_line;
-		vector<string> side_effect_sql;
-
-		while (std::getline(file, line)) {
-			string trimmed = Trim(line);
-
-			// Handle block comments /* ... */
-			if (in_block_comment) {
-				idx_t end_pos = trimmed.find("*/");
-				if (end_pos != string::npos) {
-					in_block_comment = false;
-					trimmed = Trim(trimmed.substr(end_pos + 2));
-				} else {
-					continue;
-				}
-			}
-
-			// Check for block comment start
-			idx_t block_start = trimmed.find("/*");
-			if (block_start != string::npos) {
-				idx_t block_end = trimmed.find("*/", block_start + 2);
-				if (block_end != string::npos) {
-					// Single-line block comment — remove it
-					trimmed = Trim(trimmed.substr(0, block_start) + trimmed.substr(block_end + 2));
-				} else {
-					trimmed = Trim(trimmed.substr(0, block_start));
-					in_block_comment = true;
-				}
-			}
-
-			// Strip // line comments (not inside quotes)
-			idx_t comment_pos = trimmed.find("//");
-			if (comment_pos != string::npos) {
-				// Check it's not /// (line continuation)
-				if (comment_pos + 2 < trimmed.size() && trimmed[comment_pos + 2] == '/') {
-					// Line continuation: strip /// and join with next line
-					continued_line += Trim(trimmed.substr(0, comment_pos)) + " ";
-					continue;
-				}
-				trimmed = Trim(trimmed.substr(0, comment_pos));
-			}
-
-			// Strip * line-start comments (do-file convention)
-			if (!trimmed.empty() && trimmed[0] == '*') {
-				continue;
-			}
-
-			// Handle line continuation from previous line
-			if (!continued_line.empty()) {
-				trimmed = continued_line + trimmed;
-				continued_line.clear();
-			}
-
-			// Skip empty lines
-			if (trimmed.empty()) {
-				continue;
-			}
-
-			// Strip trailing semicolons (in case the .do file has them)
-			if (!trimmed.empty() && trimmed.back() == ';') {
-				trimmed.pop_back();
-				trimmed = Trim(trimmed);
-			}
-			if (trimmed.empty()) {
-				continue;
-			}
-
-			// Check if this is a command we know
-			string sub_command;
-			if (!IsDodoCommand(trimmed, sub_command)) {
-				// Not a known command — skip
-				continue;
-			}
-
-			// In do-file execution, run transformation and side-effect commands
-			// Terminal (list, head, tail, describe) and query commands (count,
-			// summarize, tabulate) are skipped — user runs them interactively after
-			if (!IsTransformationCommand(sub_command) && !IsSideEffectCommand(sub_command)) {
-				continue;
-			}
-
-			auto sub_cmd = TokenizeCommand(trimmed);
-			state.pending_command = trimmed;
-			string sql = ProcessCommand(sub_cmd, state);
-
-			// In do-file context, use/import cannot materialize (table creation
-			// SQL can't execute mid-script). Rewrite to lazy if needed.
-			if ((sub_command == "use" || sub_command == "import") && state.materialized) {
-				// Undo materialization: replace dodo._current reference with direct file read
-				string source = ExtractQuotedString(sub_cmd.arguments);
-				string read_expr = FileReadFunction(source);
-				if (sub_command == "import") {
-					string rest = Trim(sub_cmd.arguments.substr(10));
-					read_expr = "read_csv('" + ExtractQuotedString(rest) + "')";
-				}
-				state.cte_steps.clear();
-				state.step_counter = 0;
-				state.AddStep("SELECT * FROM " + read_expr);
-				state.materialized = false;
-			}
-
-			// Side-effect commands (export, save) return SQL that must be executed
-			if (IsSideEffectCommand(sub_command)) {
-				side_effect_sql.push_back(sql);
-			}
-		}
-
-		// Return side-effect SQL followed by status
+		auto side_effect_sql = ProcessDoFile(filename, state);
 		string result;
 		for (auto &sql : side_effect_sql) {
 			result += sql + "; ";
@@ -1074,15 +885,15 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 		// label variable varname "label text"
 		// label define labelname val1 "text1" val2 "text2" ...
 		// label values varname labelname
-		string lower_args = StringUtil::Lower(cmd.arguments);
+		string lower_args = str::Lower(cmd.arguments);
 
-		if (StringUtil::StartsWith(lower_args, "variable ")) {
+		if (str::StartsWith(lower_args, "variable ")) {
 			// label variable varname "label text"
 			string rest = Trim(cmd.arguments.substr(9));
 			// First token is the variable name
 			idx_t space = rest.find(' ');
 			if (space == string::npos) {
-				throw ParserException("'label variable' requires: label variable varname \"label text\"");
+				throw DodoException("'label variable' requires: label variable varname \"label text\"");
 			}
 			string varname = Trim(rest.substr(0, space));
 			string label_text = ExtractQuotedString(Trim(rest.substr(space + 1)));
@@ -1090,13 +901,13 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 			return "SELECT 'OK' AS status";
 		}
 
-		if (StringUtil::StartsWith(lower_args, "define ")) {
+		if (str::StartsWith(lower_args, "define ")) {
 			// label define labelname val1 "text1" val2 "text2" ...
 			string rest = Trim(cmd.arguments.substr(7));
 			// First token is the label name
 			idx_t space = rest.find(' ');
 			if (space == string::npos) {
-				throw ParserException("'label define' requires: label define labelname value \"text\" ...");
+				throw DodoException("'label define' requires: label define labelname value \"text\" ...");
 			}
 			string label_name = Trim(rest.substr(0, space));
 			string remaining = Trim(rest.substr(space + 1));
@@ -1116,7 +927,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 				if (!remaining.empty() && remaining[0] == '"') {
 					idx_t end_quote = remaining.find('"', 1);
 					if (end_quote == string::npos) {
-						throw ParserException("Unmatched quote in label define");
+						throw DodoException("Unmatched quote in label define");
 					}
 					text = remaining.substr(1, end_quote - 1);
 					remaining = Trim(remaining.substr(end_quote + 1));
@@ -1140,24 +951,24 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 			return "SELECT 'OK' AS status";
 		}
 
-		if (StringUtil::StartsWith(lower_args, "values ")) {
+		if (str::StartsWith(lower_args, "values ")) {
 			// label values varname labelname
 			string rest = Trim(cmd.arguments.substr(7));
-			auto parts = StringUtil::Split(rest, ' ');
+			auto parts = str::Split(rest, ' ');
 			if (parts.size() != 2) {
-				throw ParserException("'label values' requires: label values varname labelname");
+				throw DodoException("'label values' requires: label values varname labelname");
 			}
 			string varname = Trim(parts[0]);
 			string label_name = Trim(parts[1]);
 			// Verify the label definition exists
 			if (state.value_label_defs.find(label_name) == state.value_label_defs.end()) {
-				throw ParserException("Value label '%s' not defined. Use 'label define' first.", label_name);
+				throw DodoException("Value label '" + label_name + "' not defined. Use 'label define' first.");
 			}
 			state.column_labels[varname] = label_name;
 			return "SELECT 'OK' AS status";
 		}
 
-		if (StringUtil::StartsWith(lower_args, "list")) {
+		if (str::StartsWith(lower_args, "list")) {
 			// label list — show all defined labels
 			// Build a UNION ALL of variable labels and value label definitions
 			string sql = "SELECT * FROM (VALUES ";
@@ -1212,18 +1023,18 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 			return sql;
 		}
 
-		throw ParserException("Unknown label subcommand. Use: label variable, label define, label values, or label list");
+		throw DodoException("Unknown label subcommand. Use: label variable, label define, label values, or label list");
 	}
 
 	if (cmd.command == "import") {
 		// import delimited "file", clear — same as use for CSV
-		string lower_args = StringUtil::Lower(cmd.arguments);
-		if (!StringUtil::StartsWith(lower_args, "delimited ")) {
-			throw ParserException("'import' only supports 'import delimited'");
+		string lower_args = str::Lower(cmd.arguments);
+		if (!str::StartsWith(lower_args, "delimited ")) {
+			throw DodoException("'import' only supports 'import delimited'");
 		}
 		string rest = Trim(cmd.arguments.substr(10));
 		string filename = ExtractQuotedString(rest);
-		string lower_opts = StringUtil::Lower(cmd.options);
+		string lower_opts = str::Lower(cmd.options);
 		bool lazy = (lower_opts.find("lazy") != string::npos);
 
 		// Drop previous materialized table if switching datasets
@@ -1292,7 +1103,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 	}
 
 	if (!state.HasData()) {
-		throw ParserException("No dataset in memory. Use 'use' to load data first.");
+		throw DodoException("No dataset in memory. Use 'use' to load data first.");
 	}
 
 	string prev = state.LatestStep();
@@ -1311,7 +1122,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 			}
 		} else if (!cmd.arguments.empty() && cmd.condition.empty()) {
 			// Space-separated var list -> comma-separated
-			auto vars = StringUtil::Split(cmd.arguments, ' ');
+			auto vars = str::Split(cmd.arguments, ' ');
 			string col_list;
 			for (idx_t i = 0; i < vars.size(); i++) {
 				if (i > 0) {
@@ -1321,7 +1132,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 			}
 			state.AddStep("SELECT " + col_list + " FROM " + prev);
 		} else if (!cmd.arguments.empty() && !cmd.condition.empty()) {
-			auto vars = StringUtil::Split(cmd.arguments, ' ');
+			auto vars = str::Split(cmd.arguments, ' ');
 			string col_list;
 			for (idx_t i = 0; i < vars.size(); i++) {
 				if (i > 0) {
@@ -1332,7 +1143,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 			state.AddStep("SELECT " + col_list + " FROM " + prev + " WHERE " +
 			              TrExpr(cmd.condition));
 		} else {
-			throw ParserException("Invalid 'keep' syntax");
+			throw DodoException("Invalid 'keep' syntax");
 		}
 		return "SELECT 'OK' AS status";
 	}
@@ -1348,7 +1159,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 				state.AddStep("SELECT * FROM " + prev + " WHERE NOT (" + cond + ")");
 			}
 		} else if (!cmd.arguments.empty() && cmd.condition.empty()) {
-			auto vars = StringUtil::Split(cmd.arguments, ' ');
+			auto vars = str::Split(cmd.arguments, ' ');
 			string exclude_list;
 			for (idx_t i = 0; i < vars.size(); i++) {
 				if (i > 0) {
@@ -1358,15 +1169,15 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 			}
 			state.AddStep("SELECT * EXCLUDE (" + exclude_list + ") FROM " + prev);
 		} else {
-			throw ParserException("Invalid 'drop' syntax. Use 'drop var1 var2' or 'drop if condition'.");
+			throw DodoException("Invalid 'drop' syntax. Use 'drop var1 var2' or 'drop if condition'.");
 		}
 		return "SELECT 'OK' AS status";
 	}
 
 	if (cmd.command == "rename") {
-		auto parts = StringUtil::Split(cmd.arguments, ' ');
+		auto parts = str::Split(cmd.arguments, ' ');
 		if (parts.size() != 2) {
-			throw ParserException("'rename' requires exactly two arguments: rename oldname newname");
+			throw DodoException("'rename' requires exactly two arguments: rename oldname newname");
 		}
 		string old_name = QuoteIdent(Trim(parts[0]));
 		string new_name = QuoteIdent(Trim(parts[1]));
@@ -1377,7 +1188,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 	if (cmd.command == "generate") {
 		idx_t eq_pos = cmd.arguments.find('=');
 		if (eq_pos == string::npos) {
-			throw ParserException("'generate' requires an assignment: generate varname = expression");
+			throw DodoException("'generate' requires an assignment: generate varname = expression");
 		}
 		string var_name = QuoteIdent(Trim(cmd.arguments.substr(0, eq_pos)));
 		string expr = Trim(cmd.arguments.substr(eq_pos + 1));
@@ -1396,7 +1207,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 	if (cmd.command == "replace") {
 		idx_t eq_pos = cmd.arguments.find('=');
 		if (eq_pos == string::npos) {
-			throw ParserException("'replace' requires an assignment: replace varname = expression");
+			throw DodoException("'replace' requires an assignment: replace varname = expression");
 		}
 		string var_name = QuoteIdent(Trim(cmd.arguments.substr(0, eq_pos)));
 		string expr = Trim(cmd.arguments.substr(eq_pos + 1));
@@ -1414,10 +1225,10 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 
 	if (cmd.command == "sort") {
 		string order = "ASC";
-		if (StringUtil::Lower(cmd.options) == "desc") {
+		if (str::Lower(cmd.options) == "desc") {
 			order = "DESC";
 		}
-		auto vars = StringUtil::Split(cmd.arguments, ' ');
+		auto vars = str::Split(cmd.arguments, ' ');
 		string order_clause;
 		for (idx_t i = 0; i < vars.size(); i++) {
 			if (i > 0) {
@@ -1434,14 +1245,14 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 		// Translates to window function: SELECT *, FUNC(x) OVER (PARTITION BY g) AS y FROM _prev
 		idx_t eq_pos = cmd.arguments.find('=');
 		if (eq_pos == string::npos) {
-			throw ParserException("'egen' requires an assignment: egen varname = function(arg)");
+			throw DodoException("'egen' requires an assignment: egen varname = function(arg)");
 		}
 		string var_name = QuoteIdent(Trim(cmd.arguments.substr(0, eq_pos)));
 		string rhs = Trim(cmd.arguments.substr(eq_pos + 1));
 
 		string func_name, func_arg;
 		if (!ParseFunctionCall(rhs, func_name, func_arg)) {
-			throw ParserException("'egen' requires a function call on the right side: egen y = mean(x)");
+			throw DodoException("'egen' requires a function call on the right side: egen y = mean(x)");
 		}
 
 		string sql_func = TranslateAggFunction(func_name);
@@ -1489,7 +1300,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 			if (remaining[0] == '(') {
 				idx_t close = remaining.find(')');
 				if (close == string::npos) {
-					throw ParserException("Unmatched parenthesis in collapse");
+					throw DodoException("Unmatched parenthesis in collapse");
 				}
 				current_func = Trim(remaining.substr(1, close - 1));
 				remaining = Trim(remaining.substr(close + 1));
@@ -1544,7 +1355,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 				// func(x) syntax
 				idx_t close_paren = remaining.find(')', paren_pos);
 				if (close_paren == string::npos) {
-					throw ParserException("Unmatched parenthesis in collapse expression");
+					throw DodoException("Unmatched parenthesis in collapse expression");
 				}
 				source_expr = Trim(remaining.substr(0, close_paren + 1));
 				remaining = Trim(remaining.substr(close_paren + 1));
@@ -1589,9 +1400,9 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 	if (cmd.command == "order") {
 		// order var1 var2 — move listed columns to front, rest follow
 		// options: last, after(var), before(var), alphabetical
-		auto vars = StringUtil::Split(cmd.arguments, ' ');
+		auto vars = str::Split(cmd.arguments, ' ');
 		if (vars.empty()) {
-			throw ParserException("'order' requires at least one variable name");
+			throw DodoException("'order' requires at least one variable name");
 		}
 		string col_list;
 		for (idx_t i = 0; i < vars.size(); i++) {
@@ -1611,31 +1422,31 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 		// merge m:1 varlist using "file" [, ...]
 		// merge 1:m varlist using "file" [, ...]
 		string args = cmd.arguments;
-		string lower_args = StringUtil::Lower(args);
+		string lower_args = str::Lower(args);
 
 		// Parse merge type: 1:1, m:1, 1:m
 		string merge_type;
-		if (StringUtil::StartsWith(lower_args, "1:1 ")) {
+		if (str::StartsWith(lower_args, "1:1 ")) {
 			merge_type = "1:1";
 			args = Trim(args.substr(4));
-		} else if (StringUtil::StartsWith(lower_args, "m:1 ")) {
+		} else if (str::StartsWith(lower_args, "m:1 ")) {
 			merge_type = "m:1";
 			args = Trim(args.substr(4));
-		} else if (StringUtil::StartsWith(lower_args, "1:m ")) {
+		} else if (str::StartsWith(lower_args, "1:m ")) {
 			merge_type = "1:m";
 			args = Trim(args.substr(4));
-		} else if (StringUtil::StartsWith(lower_args, "m:m ")) {
+		} else if (str::StartsWith(lower_args, "m:m ")) {
 			merge_type = "m:m";
 			args = Trim(args.substr(4));
 		} else {
-			throw ParserException("'merge' requires a type: merge 1:1, m:1, 1:m, or m:m");
+			throw DodoException("'merge' requires a type: merge 1:1, m:1, 1:m, or m:m");
 		}
 
 		// Find "using" keyword to split key vars from filename
-		string lower_rest = StringUtil::Lower(args);
+		string lower_rest = str::Lower(args);
 		idx_t using_pos = lower_rest.find(" using ");
 		if (using_pos == string::npos) {
-			throw ParserException("'merge' requires 'using': merge %s varlist using filename", merge_type);
+			throw DodoException("'merge' requires 'using': merge " + merge_type + " varlist using filename");
 		}
 		string key_vars_str = Trim(args.substr(0, using_pos));
 		string filename_str = Trim(args.substr(using_pos + 7));
@@ -1643,7 +1454,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 		string using_read = FileReadFunction(filename);
 
 		// Parse key variables (space-separated -> comma-separated)
-		auto key_vars = StringUtil::Split(key_vars_str, ' ');
+		auto key_vars = str::Split(key_vars_str, ' ');
 		string key_cols;
 		for (idx_t i = 0; i < key_vars.size(); i++) {
 			if (i > 0) {
@@ -1659,7 +1470,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 
 		if (!cmd.options.empty()) {
 			string opts = cmd.options;
-			string lower_opts = StringUtil::Lower(opts);
+			string lower_opts = str::Lower(opts);
 
 			// Parse keep()
 			idx_t keep_pos = lower_opts.find("keep(");
@@ -1667,7 +1478,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 				idx_t start = keep_pos + 5;
 				idx_t end = opts.find(')', start);
 				if (end != string::npos) {
-					string keep_str = StringUtil::Lower(Trim(opts.substr(start, end - start)));
+					string keep_str = str::Lower(Trim(opts.substr(start, end - start)));
 					// Parse keep values: match/master/using or 1/2/3
 					bool keep_master = false, keep_using = false, keep_match = false;
 					if (keep_str.find("master") != string::npos || keep_str.find("1") != string::npos) {
@@ -1710,7 +1521,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 				idx_t end = opts.find(')', start);
 				if (end != string::npos) {
 					string ku_str = Trim(opts.substr(start, end - start));
-					auto ku_vars = StringUtil::Split(ku_str, ' ');
+					auto ku_vars = str::Split(ku_str, ' ');
 					for (idx_t i = 0; i < ku_vars.size(); i++) {
 						if (i > 0) {
 							keepusing_cols += ", ";
@@ -1790,9 +1601,9 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 
 	if (cmd.command == "duplicates") {
 		// duplicates drop [varlist]
-		string lower_args = StringUtil::Lower(cmd.arguments);
-		if (!StringUtil::StartsWith(lower_args, "drop")) {
-			throw ParserException("'duplicates' only supports 'duplicates drop [varlist]'");
+		string lower_args = str::Lower(cmd.arguments);
+		if (!str::StartsWith(lower_args, "drop")) {
+			throw DodoException("'duplicates' only supports 'duplicates drop [varlist]'");
 		}
 		string rest = Trim(cmd.arguments.substr(4));
 		if (rest.empty()) {
@@ -1800,7 +1611,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 			state.AddStep("SELECT DISTINCT * FROM " + prev);
 		} else {
 			// duplicates drop var1 var2 — keep first row per group of varlist
-			auto vars = StringUtil::Split(rest, ' ');
+			auto vars = str::Split(rest, ' ');
 			string col_list;
 			for (idx_t i = 0; i < vars.size(); i++) {
 				if (i > 0) {
@@ -1823,7 +1634,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 		string gen_var;
 		// Check for generate() option
 		if (!cmd.options.empty()) {
-			string lower_opts = StringUtil::Lower(cmd.options);
+			string lower_opts = str::Lower(cmd.options);
 			idx_t gen_pos = lower_opts.find("generate(");
 			if (gen_pos == string::npos) {
 				gen_pos = lower_opts.find("gen(");
@@ -1856,14 +1667,14 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 	// --- Side-effect commands ---
 	if (cmd.command == "export") {
 		// export delimited using "file", replace
-		string lower_args = StringUtil::Lower(cmd.arguments);
-		if (!StringUtil::StartsWith(lower_args, "delimited ")) {
-			throw ParserException("'export' only supports 'export delimited'");
+		string lower_args = str::Lower(cmd.arguments);
+		if (!str::StartsWith(lower_args, "delimited ")) {
+			throw DodoException("'export' only supports 'export delimited'");
 		}
 		string rest = Trim(cmd.arguments.substr(10));
 		// Strip optional "using" keyword
-		string lower_rest = StringUtil::Lower(rest);
-		if (StringUtil::StartsWith(lower_rest, "using ")) {
+		string lower_rest = str::Lower(rest);
+		if (str::StartsWith(lower_rest, "using ")) {
 			rest = Trim(rest.substr(6));
 		}
 		string filename = ExtractQuotedString(rest);
@@ -1874,7 +1685,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 	if (cmd.command == "list") {
 		string cols = "*";
 		if (!cmd.arguments.empty()) {
-			auto vars = StringUtil::Split(cmd.arguments, ' ');
+			auto vars = str::Split(cmd.arguments, ' ');
 			cols = "";
 			for (idx_t i = 0; i < vars.size(); i++) {
 				if (i > 0) {
@@ -1960,7 +1771,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 
 	if (cmd.command == "summarize") {
 		if (cmd.arguments.empty()) {
-			throw ParserException("'summarize' requires at least one variable name");
+			throw DodoException("'summarize' requires at least one variable name");
 		}
 		string var = QuoteIdent(Trim(cmd.arguments));
 		string where_clause;
@@ -1981,9 +1792,9 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 	}
 
 	if (cmd.command == "tabulate") {
-		auto vars = StringUtil::Split(cmd.arguments, ' ');
+		auto vars = str::Split(cmd.arguments, ' ');
 		if (vars.empty()) {
-			throw ParserException("'tabulate' requires at least one variable name");
+			throw DodoException("'tabulate' requires at least one variable name");
 		}
 		string group_cols;
 		for (idx_t i = 0; i < vars.size(); i++) {
@@ -2002,7 +1813,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 
 	if (cmd.command == "save") {
 		string target = ExtractQuotedString(cmd.arguments);
-		string lower_opts = StringUtil::Lower(cmd.options);
+		string lower_opts = str::Lower(cmd.options);
 		bool save_as_table = (lower_opts.find("table") != string::npos ||
 		                      lower_opts.find("memory") != string::npos);
 
@@ -2027,11 +1838,11 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 		}
 
 		// Save to disk file
-		string lower_fn = StringUtil::Lower(target);
+		string lower_fn = str::Lower(target);
 		string format_clause;
-		if (StringUtil::EndsWith(lower_fn, ".csv")) {
+		if (str::EndsWith(lower_fn, ".csv")) {
 			format_clause = " (FORMAT CSV, HEADER)";
-		} else if (StringUtil::EndsWith(lower_fn, ".parquet")) {
+		} else if (str::EndsWith(lower_fn, ".parquet")) {
 			format_clause = " (FORMAT PARQUET)";
 		}
 		return "COPY (" + state.BuildQuery("SELECT * FROM " + prev) + ") TO '" + target + "'" + format_clause;
@@ -2040,9 +1851,9 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 	if (cmd.command == "append") {
 		// append using "file.csv"
 		string args = cmd.arguments;
-		string lower_args = StringUtil::Lower(args);
+		string lower_args = str::Lower(args);
 		// Strip optional "using" keyword
-		if (StringUtil::StartsWith(lower_args, "using ")) {
+		if (str::StartsWith(lower_args, "using ")) {
 			args = Trim(args.substr(6));
 		}
 		string filename = ExtractQuotedString(args);
@@ -2056,7 +1867,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 		// Replace missing values with a specified value
 		string mv_value = "0";  // default
 		// Parse mv() from options
-		string lower_opts = StringUtil::Lower(cmd.options);
+		string lower_opts = str::Lower(cmd.options);
 		idx_t mv_pos = lower_opts.find("mv(");
 		if (mv_pos != string::npos) {
 			idx_t start = mv_pos + 3;
@@ -2066,11 +1877,11 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 			}
 		}
 
-		auto vars = StringUtil::Split(cmd.arguments, ' ');
+		auto vars = str::Split(cmd.arguments, ' ');
 		// Check for _all
 		bool all_vars = false;
 		for (auto &v : vars) {
-			if (StringUtil::Lower(Trim(v)) == "_all") {
+			if (str::Lower(Trim(v)) == "_all") {
 				all_vars = true;
 				break;
 			}
@@ -2082,7 +1893,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 			// SELECT COLUMNS(c -> COALESCE(c, mv_value)) FROM _prev
 			// Actually DuckDB supports: SELECT * REPLACE (...) but we'd need column names
 			// Simplest: just pass through, user should list columns explicitly
-			throw ParserException("'mvencode _all' is not yet supported. List column names explicitly.");
+			throw DodoException("'mvencode _all' is not yet supported. List column names explicitly.");
 		}
 
 		string replace_list;
@@ -2104,21 +1915,21 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 	if (cmd.command == "reshape") {
 		// reshape long varlist, i(id_vars) j(time_var)
 		// reshape wide varlist, i(id_vars) j(time_var)
-		string lower_args = StringUtil::Lower(cmd.arguments);
-		bool is_long = StringUtil::StartsWith(lower_args, "long ");
-		bool is_wide = StringUtil::StartsWith(lower_args, "wide ");
+		string lower_args = str::Lower(cmd.arguments);
+		bool is_long = str::StartsWith(lower_args, "long ");
+		bool is_wide = str::StartsWith(lower_args, "wide ");
 
 		if (!is_long && !is_wide) {
-			throw ParserException("'reshape' requires 'long' or 'wide': reshape long/wide varlist, i(ids) j(timevar)");
+			throw DodoException("'reshape' requires 'long' or 'wide': reshape long/wide varlist, i(ids) j(timevar)");
 		}
 
 		string varlist_str = Trim(cmd.arguments.substr(5)); // skip "long " or "wide "
-		auto value_vars = StringUtil::Split(varlist_str, ' ');
+		auto value_vars = str::Split(varlist_str, ' ');
 
 		// Parse i() and j() from options
 		string i_vars, j_var;
 		string opts = cmd.options;
-		string lower_opt = StringUtil::Lower(opts);
+		string lower_opt = str::Lower(opts);
 
 		idx_t i_pos = lower_opt.find("i(");
 		if (i_pos != string::npos) {
@@ -2139,7 +1950,7 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 		}
 
 		if (j_var.empty()) {
-			throw ParserException("'reshape' requires j(varname) option");
+			throw DodoException("'reshape' requires j(varname) option");
 		}
 
 		string qj = QuoteIdent(j_var);
@@ -2183,13 +1994,13 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 			// inside a CTE. We create a temp table from the current chain, PIVOT it,
 			// then restart the chain from the temp table.
 			if (i_vars.empty()) {
-				throw ParserException("'reshape wide' requires i(id_vars) option");
+				throw DodoException("'reshape wide' requires i(id_vars) option");
 			}
 			if (value_vars.size() != 1) {
-				throw ParserException("'reshape wide' currently supports one value variable");
+				throw DodoException("'reshape wide' currently supports one value variable");
 			}
 			string value_var = Trim(value_vars[0]);
-			auto i_var_list = StringUtil::Split(i_vars, ' ');
+			auto i_var_list = str::Split(i_vars, ' ');
 			string i_cols;
 			for (idx_t i = 0; i < i_var_list.size(); i++) {
 				if (i > 0) {
@@ -2210,295 +2021,128 @@ static string ProcessCommand(const DodoCommand &cmd, DodoStateInfo &state) {
 		return "SELECT 'OK' AS status";
 	}
 
-	throw ParserException("Unimplemented command: " + cmd.command);
+	throw DodoException("Unimplemented command: " + cmd.command);
 }
 
 //===--------------------------------------------------------------------===//
-// parse_function: detect commands (called when standard parser fails)
+// ProcessDoFile: read and execute a .do file, returning side-effect SQL
 //===--------------------------------------------------------------------===//
-static ParserExtensionParseResult dodo_parse(ParserExtensionInfo *info, const string &query) {
-	string command;
-	if (!IsDodoCommand(query, command)) {
-		return ParserExtensionParseResult();
+vector<string> ProcessDoFile(const string &filename, DodoState &state) {
+	std::ifstream file(filename);
+	if (!file.is_open()) {
+		throw DodoException("Cannot open file: " + filename);
 	}
-	auto parse_data = make_uniq<DodoParseData>(query);
-	return ParserExtensionParseResult(std::move(parse_data));
-}
 
-// Check if a single statement needs parser_override (SQL keyword conflict or PIVOT)
-static bool NeedsParserOverride(const string &stmt, DodoStateInfo &state) {
-	string lower = StringUtil::Lower(stmt);
-	if (state.HasData() || (!state.cte_steps.empty())) {
-		if (StringUtil::StartsWith(lower, "describe") &&
-		    (lower.size() == 8 || lower[8] == ' ')) {
-			return true;
+	string line;
+	bool in_block_comment = false;
+	string continued_line;
+	vector<string> side_effect_sql;
+
+	while (std::getline(file, line)) {
+		string trimmed = Trim(line);
+
+		// Handle block comments /* ... */
+		if (in_block_comment) {
+			idx_t end_pos = trimmed.find("*/");
+			if (end_pos != string::npos) {
+				in_block_comment = false;
+				trimmed = Trim(trimmed.substr(end_pos + 2));
+			} else {
+				continue;
+			}
 		}
-		if (StringUtil::StartsWith(lower, "summarize") &&
-		    (lower.size() == 9 || lower[9] == ' ')) {
-			return true;
+
+		// Check for block comment start
+		idx_t block_start = trimmed.find("/*");
+		if (block_start != string::npos) {
+			idx_t block_end = trimmed.find("*/", block_start + 2);
+			if (block_end != string::npos) {
+				// Single-line block comment — remove it
+				trimmed = Trim(trimmed.substr(0, block_start) + trimmed.substr(block_end + 2));
+			} else {
+				trimmed = Trim(trimmed.substr(0, block_start));
+				in_block_comment = true;
+			}
 		}
-		if (StringUtil::StartsWith(lower, "reshape") && lower.find("wide") != string::npos) {
-			return true;
+
+		// Strip // line comments (not inside quotes)
+		idx_t comment_pos = trimmed.find("//");
+		if (comment_pos != string::npos) {
+			// Check it's not /// (line continuation)
+			if (comment_pos + 2 < trimmed.size() && trimmed[comment_pos + 2] == '/') {
+				// Line continuation: strip /// and join with next line
+				continued_line += Trim(trimmed.substr(0, comment_pos)) + " ";
+				continue;
+			}
+			trimmed = Trim(trimmed.substr(0, comment_pos));
 		}
-	}
-	return false;
-}
 
-//===--------------------------------------------------------------------===//
-// parser_override: handles commands that conflict with SQL keywords
-// (describe, summarize, reshape wide) — called BEFORE the standard parser.
-// Must handle full multi-statement strings by splitting on ';'.
-//===--------------------------------------------------------------------===//
-static ParserOverrideResult dodo_parser_override(ParserExtensionInfo *info, const string &query,
-                                                     ParserOptions &options) {
-	auto &state = dynamic_cast<DodoStateInfo &>(*info);
+		// Strip * line-start comments (do-file convention)
+		if (!trimmed.empty() && trimmed[0] == '*') {
+			continue;
+		}
 
-	// Split the full query into individual statements by ';'
-	auto statements_str = StringUtil::Split(query, ';');
+		// Handle line continuation from previous line
+		if (!continued_line.empty()) {
+			trimmed = continued_line + trimmed;
+			continued_line.clear();
+		}
 
-	// Check if ANY statement needs our override
-	// We must take over the ENTIRE query if any statement is describe/summarize/reshape wide,
-	// because the standard parser would handle those before our parse_function sees them.
-	// We also take over if earlier commands will load data (making later describe valid).
-	bool has_dodo_commands = false;
-	bool has_conflict_commands = false;
-	for (auto &s : statements_str) {
-		string trimmed = Trim(s);
+		// Skip empty lines
 		if (trimmed.empty()) {
 			continue;
 		}
-		string lower = StringUtil::Lower(trimmed);
 
-		// Check for SQL-conflicting commands:
-		// use "file" — SQL USE schema conflicts
-		// import delimited — SQL IMPORT conflicts
-		// describe, summarize — SQL DESCRIBE/SUMMARIZE conflicts
-		// reshape wide — PIVOT generates MULTI statements
-		if (StringUtil::StartsWith(lower, "use ") && (lower.find('"') != string::npos || lower.find('\'') != string::npos)) {
-			has_conflict_commands = true;
+		// Strip trailing semicolons (in case the .do file has them)
+		if (!trimmed.empty() && trimmed.back() == ';') {
+			trimmed.pop_back();
+			trimmed = Trim(trimmed);
 		}
-		if (StringUtil::StartsWith(lower, "import ")) {
-			has_conflict_commands = true;
-		}
-		if (StringUtil::StartsWith(lower, "describe") || StringUtil::StartsWith(lower, "summarize")) {
-			has_conflict_commands = true;
-		}
-		if (StringUtil::StartsWith(lower, "reshape") && lower.find("wide") != string::npos) {
-			has_conflict_commands = true;
+		if (trimmed.empty()) {
+			continue;
 		}
 
-		string cmd_name;
-		if (IsDodoCommand(trimmed, cmd_name)) {
-			has_dodo_commands = true;
+		// Check if this is a command we know
+		string sub_command;
+		if (!IsDodoCommand(trimmed, sub_command)) {
+			// Not a known command — skip
+			continue;
 		}
-	}
 
-	// Take over if there's a SQL-conflicting command AND either known commands or existing state.
-	// When we take over, we process ALL statements ourselves (updating state for use/label/etc
-	// before generating SQL for describe/summarize).
-	// Also take over when live_view is enabled and we have known commands (need multi-statement injection).
-	bool any_needs_override = has_conflict_commands && (has_dodo_commands || state.HasData());
-	if (!any_needs_override && (state.live_view_enabled || state.materialized) && has_dodo_commands) {
-		any_needs_override = true;
-	}
+		// In do-file execution, run transformation and side-effect commands
+		// Terminal (list, head, tail, describe) and query commands (count,
+		// summarize, tabulate) are skipped — user runs them interactively after
+		if (!IsTransformationCommand(sub_command) && !IsSideEffectCommand(sub_command)) {
+			continue;
+		}
 
-	if (!any_needs_override) {
-		return ParserOverrideResult();
-	}
+		auto sub_cmd = TokenizeCommand(trimmed);
+		state.pending_command = trimmed;
+		string sql = ProcessCommand(sub_cmd, state);
 
-	// Process ALL statements ourselves
-	try {
-		vector<unique_ptr<SQLStatement>> all_statements;
-
-		for (auto &s : statements_str) {
-			string trimmed = Trim(s);
-			if (trimmed.empty()) {
-				continue;
+		// In do-file context, use/import cannot materialize (table creation
+		// SQL can't execute mid-script). Rewrite to lazy if needed.
+		if ((sub_command == "use" || sub_command == "import") && state.materialized) {
+			// Undo materialization: replace dodo._current reference with direct file read
+			string source = ExtractQuotedString(sub_cmd.arguments);
+			string read_expr = FileReadFunction(source);
+			if (sub_command == "import") {
+				string rest = Trim(sub_cmd.arguments.substr(10));
+				read_expr = "read_csv('" + ExtractQuotedString(rest) + "')";
 			}
-
-			// Check if this is a known command
-			string cmd_name;
-			if (IsDodoCommand(trimmed, cmd_name)) {
-				auto cmd = TokenizeCommand(trimmed);
-				state.pending_command = trimmed;
-				string sql = ProcessCommand(cmd, state);
-
-				// Handle __PIVOT__ marker
-				if (StringUtil::StartsWith(sql, "__PIVOT__:")) {
-					string rest = sql.substr(10);
-					idx_t state_pos = rest.find("||STATE||");
-					string pivot_sql = rest.substr(0, state_pos);
-					string table_name = rest.substr(state_pos + 9);
-
-					Parser parser;
-					parser.ParseQuery(pivot_sql);
-					state.AddStep("SELECT * FROM " + table_name);
-					for (auto &stmt : parser.statements) {
-						all_statements.push_back(std::move(stmt));
-					}
-					continue;
-				}
-
-				Parser parser;
-				parser.ParseQuery(sql);
-				for (auto &stmt : parser.statements) {
-					all_statements.push_back(std::move(stmt));
-				}
-
-				// Live view: inject view creation for UI data panel
-				string view_sql = BuildLiveViewSQL(state);
-				if (!view_sql.empty()) {
-					Parser view_parser;
-					view_parser.ParseQuery(view_sql);
-					for (auto &stmt : view_parser.statements) {
-						all_statements.push_back(std::move(stmt));
-					}
-				}
-
-				// History table: inject rebuild for UI visibility
-				string history_sql = BuildHistorySQL(state);
-				if (!history_sql.empty()) {
-					Parser hist_parser;
-					hist_parser.ParseQuery(history_sql);
-					for (auto &stmt : hist_parser.statements) {
-						all_statements.push_back(std::move(stmt));
-					}
-				}
-			} else {
-				// Not a known command — parse as regular SQL
-				Parser parser;
-				parser.ParseQuery(trimmed);
-				for (auto &stmt : parser.statements) {
-					all_statements.push_back(std::move(stmt));
-				}
-			}
+			state.cte_steps.clear();
+			state.step_counter = 0;
+			state.AddStep("SELECT * FROM " + read_expr);
+			state.materialized = false;
 		}
 
-		if (all_statements.empty()) {
-			return ParserOverrideResult();
+		// Side-effect commands (export, save) return SQL that must be executed
+		if (IsSideEffectCommand(sub_command)) {
+			side_effect_sql.push_back(sql);
 		}
-		return ParserOverrideResult(std::move(all_statements));
-	} catch (std::exception &ex) {
-		return ParserOverrideResult(ex);
-	}
-}
-
-//===--------------------------------------------------------------------===//
-// plan_function: generate SQL, store parsed statement, throw to redirect
-//===--------------------------------------------------------------------===//
-static ParserExtensionPlanResult dodo_plan(ParserExtensionInfo *info, ClientContext &context,
-                                               unique_ptr<ParserExtensionParseData> parse_data) {
-	auto &dodo_data = dynamic_cast<DodoParseData &>(*parse_data);
-	auto &state = dynamic_cast<DodoStateInfo &>(*info);
-
-	// Generate the SQL from the command
-	auto cmd = TokenizeCommand(dodo_data.raw_query);
-	state.pending_command = dodo_data.raw_query;
-	string sql = ProcessCommand(cmd, state);
-
-	// Parse the generated SQL with DuckDB's parser
-	Parser parser;
-	try {
-		parser.ParseQuery(sql);
-	} catch (std::exception &ex) {
-		throw BinderException("dodo: failed to parse generated SQL: %s\nSQL: %s", ex.what(), sql);
-	}
-	if (parser.statements.empty()) {
-		throw BinderException("dodo: generated SQL produced no statements");
 	}
 
-	// Store the parsed statement in client context state
-	auto bind_state = make_shared_ptr<DodoBindState>(std::move(parser.statements[0]));
-	context.registered_state->Remove("dodo_bind");
-	context.registered_state->Insert("dodo_bind", bind_state);
-
-	// Throw a BinderException to redirect to OperatorExtension::Bind
-	throw BinderException("dodo redirect to operator bind");
+	return side_effect_sql;
 }
 
-//===--------------------------------------------------------------------===//
-// OperatorExtension::Bind — picks up stored statement and binds it
-//===--------------------------------------------------------------------===//
-BoundStatement dodo_bind(ClientContext &context, Binder &binder, OperatorExtensionInfo *info,
-                             SQLStatement &statement) {
-	// Check if we have a stored statement from plan_function
-	auto bind_state = context.registered_state->Get<DodoBindState>("dodo_bind");
-	if (!bind_state || !bind_state->statement) {
-		// Not our statement — return empty to let other extensions try
-		return BoundStatement();
-	}
-
-	// Bind the stored SQL statement
-	auto sql_binder = Binder::CreateBinder(context, &binder);
-	auto result = sql_binder->Bind(*bind_state->statement);
-
-	// Clear the bind state
-	context.registered_state->Remove("dodo_bind");
-
-	return result;
-}
-
-//===--------------------------------------------------------------------===//
-// Extension Loading
-//===--------------------------------------------------------------------===//
-
-static void LoadInternal(ExtensionLoader &loader) {
-	auto &instance = loader.GetDatabaseInstance();
-	auto &config = DBConfig::GetConfig(instance);
-
-	// Shared state for all parser paths
-	auto shared_state = make_shared_ptr<DodoStateInfo>();
-	g_dodo_state = shared_state.get();
-
-	// Register parser extension (parse_function for most commands, parser_override for SQL-conflicting ones)
-	ParserExtension parser_ext;
-	parser_ext.parse_function = dodo_parse;
-	parser_ext.plan_function = dodo_plan;
-	parser_ext.parser_override = dodo_parser_override;
-	parser_ext.parser_info = shared_state;
-	ParserExtension::Register(config, parser_ext);
-
-	// Enable parser override in fallback mode (override runs first, falls back to standard parser)
-	config.SetOptionByName("allow_parser_override_extension", Value("fallback"));
-
-	// Register operator extension for the bind redirect
-	auto operator_ext = make_shared_ptr<DodoOperatorExtension>();
-	OperatorExtension::Register(config, operator_ext);
-
-	// Register dodo_live_view option: SET dodo_live_view = true
-	config.AddExtensionOption(
-	    "dodo_live_view",
-	    "Create/replace _dodo_data view after each transformation (for DuckDB UI)",
-	    LogicalType::BOOLEAN,
-	    Value::BOOLEAN(false),
-	    [](ClientContext &context, SetScope scope, Value &parameter) {
-	        if (g_dodo_state) {
-	            g_dodo_state->live_view_enabled = parameter.GetValue<bool>();
-	        }
-	    });
-}
-
-void DodoExtension::Load(ExtensionLoader &loader) {
-	LoadInternal(loader);
-}
-
-std::string DodoExtension::Name() {
-	return "dodo";
-}
-
-std::string DodoExtension::Version() const {
-#ifdef EXT_VERSION_DODO
-	return EXT_VERSION_DODO;
-#else
-	return "";
-#endif
-}
-
-} // namespace duckdb
-
-extern "C" {
-
-DUCKDB_CPP_EXTENSION_ENTRY(dodo, loader) {
-	duckdb::LoadInternal(loader);
-}
-}
+} // namespace dodo

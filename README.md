@@ -87,6 +87,46 @@ list;
 
 ---
 
+## dodoc — standalone .do-to-SQL compiler
+
+`dodoc` compiles `.do` files to SQL without DuckDB. No dependencies, single binary.
+
+### Install from release
+
+Download the binary for your platform from [GitHub Releases](https://github.com/codedthinking/dodo/releases), then:
+
+```bash
+tar xzf dodoc-macos-arm64.tar.gz
+sudo install dodoc /usr/local/bin/
+```
+
+### Build from source
+
+```bash
+make dodoc
+sudo make dodoc-install
+```
+
+### Use
+
+```bash
+# stdin to stdout
+echo 'use "data.csv", clear
+keep if year >= 2020
+generate profit = revenue - cost' | dodoc
+
+# file to stdout
+dodoc analysis/clean.do
+
+# pipe into DuckDB
+dodoc analysis/clean.do | duckdb
+
+# with annotations
+dodoc --annotate script.do -o output.sql
+```
+
+---
+
 ## Supported commands
 
 23+ commands across three families — every one translates to SQL.

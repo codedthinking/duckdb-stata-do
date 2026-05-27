@@ -11,9 +11,9 @@ project(${TARGET_NAME})
 set(CMAKE_CXX_STANDARD "17" CACHE STRING "C++ standard to enforce")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-include_directories(src/include)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src/extension ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
 
-set(EXTENSION_SOURCES src/dodo_extension.cpp)
+set(EXTENSION_SOURCES src/extension/dodo_extension.cpp src/core/dodo_core.cpp)
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
@@ -23,3 +23,8 @@ install(
   EXPORT "${DUCKDB_EXPORT_SET}"
   LIBRARY DESTINATION "${INSTALL_LIB_DIR}"
   ARCHIVE DESTINATION "${INSTALL_LIB_DIR}")
+
+# CLI tool (standalone, no DuckDB dependency)
+add_executable(dodoc src/cli/dodoc.cpp src/core/dodo_core.cpp)
+target_include_directories(dodoc PRIVATE src/core)
+target_compile_features(dodoc PRIVATE cxx_std_17)
