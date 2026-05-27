@@ -123,7 +123,13 @@ inline bool NeedsQuoting(const std::string &s) {
 
 inline std::string QuoteIdent(const std::string &s) {
 	if (NeedsQuoting(s)) {
-		return "\"" + s + "\"";
+		std::string escaped = s;
+		std::size_t pos = 0;
+		while ((pos = escaped.find('"', pos)) != std::string::npos) {
+			escaped.insert(pos, 1, '"');
+			pos += 2;
+		}
+		return "\"" + escaped + "\"";
 	}
 	return s;
 }
