@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <title>dodo — favicon</title>
-  <circle cx="32" cy="32" r="29" fill="#D8A44C" stroke="#1A1A1A" stroke-width="3"></circle>
-  <path d="M 19 50 C 12 47, 11 38, 16 32 C 17 28, 20 26, 23 25 C 23 21, 26 17, 30 15 C 32 11, 39 11, 43 15 C 46 18, 46 22, 44 25 L 57 31 L 44 36 C 46 39, 48 44, 47 47 C 47 50, 44 51, 41 51 L 25 51 C 22 51, 20 51, 19 50 Z" fill="#F3E7C9" stroke="#1A1A1A" stroke-width="3" stroke-linejoin="round"></path>
-  <circle cx="38" cy="21" r="2" fill="#1A1A1A"></circle>
-</svg>
