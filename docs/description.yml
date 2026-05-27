@@ -1,6 +1,6 @@
 extension:
   name: dodo
-  description: "Dodo: run .do file commands in DuckDB"
+  description: "Run .do files in DuckDB"
   version: 0.1.1
   language: C++
   build: cmake
@@ -14,15 +14,15 @@ repo:
 
 docs:
   hello_world: |
-    -- Load a CSV and filter it with Stata syntax
+    -- Run .do commands in DuckDB
     use "data/firms.csv", clear;
     keep if year >= 2020;
     generate profit = revenue - cost;
     list;
   extended_description: |
-    A DuckDB extension that interprets a subset of Stata .do file commands,
-    translating them to SQL via a lazy CTE chain. Supports data manipulation
-    (keep, drop, generate, replace, rename, sort, egen, collapse, reshape),
-    inspection (list, count, summarize, tabulate, describe), and I/O
-    (use, save, append). Run .do files directly with `do "script.do"`.
-    Inspired by Kezdi.jl.
+    dodo reads .do file commands and executes them on DuckDB's analytical
+    engine. Supports data manipulation (keep, drop, generate, replace,
+    rename, sort, egen, collapse, reshape, merge), inspection (list, count,
+    summarize, tabulate, describe, history), state management (undo, redo,
+    preserve, restore), and I/O (use, save, append, import/export delimited).
+    Run .do files directly with `do "script.do"`. Inspired by Kezdi.jl.

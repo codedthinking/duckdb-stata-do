@@ -1,0 +1,277 @@
+/* ============================================================
+   dodo Design System — Colors & Type
+   A DuckDB extension that reads and executes .do files.
+   Walks like .do. Quacks like DuckDB.
+   ============================================================ */
+
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap");
+
+:root {
+  /* ----------  Color tokens — raw palette  ---------- */
+  --ochre-50:  #FBF6E8;   /* fossil ivory, lifted */
+  --ochre-100: #F7F2E8;   /* warm page background */
+  --ochre-200: #F3E7C9;   /* fossil ivory */
+  --ochre-300: #EBD299;
+  --ochre-400: #DDB66A;
+  --ochre-500: #D8A44C;   /* primary ochre */
+  --ochre-600: #C49A42;   /* mid ochre */
+  --ochre-700: #A8802F;
+  --ochre-800: #8C5A2B;   /* accent brown */
+  --ochre-900: #5E3D1C;
+
+  --ink-50:  #F4F2EE;
+  --ink-100: #E2DED6;
+  --ink-200: #B8B3A8;
+  --ink-400: #6B6760;
+  --ink-700: #2A2722;
+  --ink-900: #1A1A1A;     /* outline black */
+  --ink-950: #111111;     /* dark background */
+
+  --duckdb-yellow: #FFF000;   /* reference only — do not use as a fill */
+
+  /* Semantic — surfaces */
+  --bg:           var(--ochre-100);
+  --bg-elevated: #FFFCF4;
+  --bg-sunken:   var(--ochre-200);
+  --bg-inverse:  var(--ink-950);
+
+  /* Semantic — foreground */
+  --fg1:         var(--ink-900);          /* primary text */
+  --fg2:         var(--ink-700);          /* secondary text */
+  --fg3:         var(--ink-400);          /* tertiary, captions */
+  --fg-muted:    var(--ink-200);
+  --fg-inverse:  var(--ochre-200);
+  --fg-on-ochre: var(--ink-900);
+
+  /* Semantic — accent */
+  --accent:        var(--ochre-500);
+  --accent-strong: var(--ochre-700);
+  --accent-deep:   var(--ochre-800);
+  --accent-soft:   var(--ochre-200);
+
+  /* Semantic — lines */
+  --line:         var(--ink-900);         /* hard outline, brand-defining */
+  --line-soft:    rgba(26,26,26,0.16);
+  --line-hair:    rgba(26,26,26,0.08);
+
+  /* Semantic — states */
+  --success:    #4F7A3B;
+  --warning:    #B86E1C;
+  --danger:     #9E2A1F;
+  --info:       var(--ochre-800);
+
+  /* Code / terminal */
+  --term-bg:     #15130E;
+  --term-bg-2:   #1F1B12;
+  --term-fg:     var(--ochre-200);
+  --term-prompt: var(--ochre-500);
+  --term-comment:#7A6F55;
+  --term-kw:     #E8B45A;
+  --term-str:    #C9A66B;
+  --term-num:    #DD9A55;
+
+  /* ----------  Type system  ---------- */
+  --font-mono:    "JetBrains Mono", "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
+  --font-sans:    "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-display: "JetBrains Mono", ui-monospace, monospace; /* wordmark/headers */
+
+  --tracking-tight:   -0.03em;
+  --tracking-snug:    -0.015em;
+  --tracking-normal:   0;
+  --tracking-wide:     0.04em;
+  --tracking-caps:     0.12em;
+
+  --leading-tight:  1.1;
+  --leading-snug:   1.25;
+  --leading-normal: 1.5;
+  --leading-loose:  1.7;
+
+  /* Scale — modular, 1.25 */
+  --t-12: 12px;
+  --t-13: 13px;
+  --t-14: 14px;
+  --t-16: 16px;
+  --t-18: 18px;
+  --t-20: 20px;
+  --t-24: 24px;
+  --t-30: 30px;
+  --t-36: 36px;
+  --t-48: 48px;
+  --t-60: 60px;
+  --t-72: 72px;
+  --t-96: 96px;
+
+  /* ----------  Space / radius / line / shadow  ---------- */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+  --s-9: 96px;
+
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-lg: 14px;
+  --r-xl: 22px;
+  --r-pill: 999px;
+  --r-circle: 50%;
+
+  --bw-hair: 1px;
+  --bw-1:    1.5px;
+  --bw-2:    2px;
+  --bw-3:    3px;
+  --bw-4:    4px;     /* brand-defining outline weight */
+
+  /* Hard, offset shadows — fossil-block feel, no soft blur drift */
+  --sh-1: 2px 2px 0 var(--line);
+  --sh-2: 4px 4px 0 var(--line);
+  --sh-3: 6px 6px 0 var(--line);
+  --sh-soft-1: 0 1px 0 rgba(26,26,26,0.08), 0 2px 6px rgba(26,26,26,0.04);
+  --sh-soft-2: 0 2px 0 rgba(26,26,26,0.06), 0 8px 24px rgba(26,26,26,0.08);
+
+  --ease-standard: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-in:       cubic-bezier(0.5, 0, 1, 0.5);
+  --ease-out:      cubic-bezier(0, 0.5, 0.5, 1);
+  --dur-fast:    120ms;
+  --dur-normal:  200ms;
+  --dur-slow:    360ms;
+}
+
+/* ----------  Dark mode  ---------- */
+:root[data-theme="dark"], .dodo-dark {
+  --bg:          var(--ink-950);
+  --bg-elevated: #1A1813;
+  --bg-sunken:   #0B0A08;
+  --bg-inverse:  var(--ochre-100);
+
+  --fg1:        var(--ochre-100);
+  --fg2:        var(--ochre-200);
+  --fg3:        #9C927C;
+  --fg-muted:   #4A4538;
+  --fg-inverse: var(--ink-900);
+
+  --line:       var(--ochre-200);
+  --line-soft:  rgba(243,231,201,0.18);
+  --line-hair:  rgba(243,231,201,0.08);
+
+  --sh-1: 2px 2px 0 var(--line);
+  --sh-2: 4px 4px 0 var(--line);
+  --sh-3: 6px 6px 0 var(--line);
+}
+
+/* ============================================================
+   Semantic element styles — use these classes everywhere.
+   ============================================================ */
+
+.dodo-wordmark,
+.dd-wordmark {
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.06em;
+  text-transform: lowercase;
+  font-feature-settings: "ss01" on, "calt" off;
+  color: var(--fg1);
+}
+
+.dd-h1 {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: var(--t-60);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+  color: var(--fg1);
+  text-wrap: balance;
+}
+
+.dd-h2 {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: var(--t-36);
+  line-height: var(--leading-snug);
+  letter-spacing: var(--tracking-snug);
+  color: var(--fg1);
+  text-wrap: balance;
+}
+
+.dd-h3 {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: var(--t-24);
+  line-height: var(--leading-snug);
+  letter-spacing: var(--tracking-snug);
+  color: var(--fg1);
+}
+
+.dd-h4 {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: var(--t-18);
+  line-height: var(--leading-snug);
+  color: var(--fg1);
+}
+
+.dd-eyebrow {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: var(--t-12);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--accent-deep);
+}
+
+.dd-p {
+  font-family: var(--font-sans);
+  font-weight: 400;
+  font-size: var(--t-16);
+  line-height: var(--leading-normal);
+  color: var(--fg2);
+  text-wrap: pretty;
+}
+
+.dd-lead {
+  font-family: var(--font-sans);
+  font-weight: 400;
+  font-size: var(--t-20);
+  line-height: var(--leading-snug);
+  color: var(--fg2);
+  text-wrap: pretty;
+}
+
+.dd-small {
+  font-family: var(--font-sans);
+  font-size: var(--t-13);
+  line-height: var(--leading-normal);
+  color: var(--fg3);
+}
+
+.dd-code,
+.dd-mono {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+  letter-spacing: 0;
+  color: var(--fg1);
+}
+
+.dd-kbd {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  padding: 2px 6px;
+  border: var(--bw-1) solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg-elevated);
+  box-shadow: var(--sh-1);
+}
+
+/* Inline code chip — same spirit as kbd, softer */
+.dd-inline-code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  padding: 1px 6px;
+  background: var(--accent-soft);
+  border: var(--bw-hair) solid var(--line-soft);
+  border-radius: var(--r-sm);
+  color: var(--accent-deep);
+}

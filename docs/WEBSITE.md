@@ -4,7 +4,7 @@
 
 This guide gives a design agent everything it needs to design a documentation website for **dodo**, a DuckDB extension that runs `.do` files. It covers the site structure, all commands with code examples, and the tone/brand constraints.
 
-Read `BRANDING.md` for visual identity, color palette, typography, and logo direction.
+Read `BRANDING.md` for visual identity, color palette, typography, and logo direction. Brand assets (SVGs) are in the repo's `/assets` directory — hero banners, CTE chain diagram, commands cheatsheet, terminal demo, social card, logo variants, pipeline diagram, and favicon.
 
 ---
 
