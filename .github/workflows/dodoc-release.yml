@@ -22,8 +22,9 @@ jobs:
             artifact: dodoc-macos-arm64
           - os: macos
             arch: x86_64
-            runner: macos-13
+            runner: macos-14
             artifact: dodoc-macos-x86_64
+            cross: "-target x86_64-apple-macos12"
           - os: linux
             arch: x86_64
             runner: ubuntu-22.04
@@ -44,11 +45,15 @@ jobs:
           if [ "${{ matrix.static }}" = "true" ]; then
             CXXFLAGS="$CXXFLAGS -static"
           fi
+          if [ -n "${{ matrix.cross }}" ]; then
+            CXXFLAGS="$CXXFLAGS ${{ matrix.cross }}"
+          fi
           mkdir -p build/dodoc
           c++ $CXXFLAGS -Isrc/core -o build/dodoc/dodoc src/cli/dodoc.cpp src/core/dodo_core.cpp
           strip build/dodoc/dodoc || true
 
       - name: Smoke test
+        if: ${{ !matrix.cross }}
         run: |
           echo 'use "data.csv", clear' | build/dodoc/dodoc
           build/dodoc/dodoc --help
