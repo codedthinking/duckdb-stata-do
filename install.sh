@@ -71,8 +71,12 @@ main() {
         xattr -d com.apple.quarantine "$tmpdir/$BINARY" 2>/dev/null || true
     fi
 
-    # Install — try /usr/local/bin, fall back to ~/.local/bin
-    install_dir="/usr/local/bin"
+    # Pick install dir: /opt/homebrew/bin on ARM Mac, /usr/local/bin otherwise, ~/.local/bin as fallback
+    if [ "$os" = "Darwin" ] && [ "$arch" = "arm64" ] && [ -d "/opt/homebrew/bin" ]; then
+        install_dir="/opt/homebrew/bin"
+    else
+        install_dir="/usr/local/bin"
+    fi
     if [ -w "$install_dir" ]; then
         install "$tmpdir/$BINARY" "$install_dir/$BINARY"
     elif command -v sudo > /dev/null 2>&1; then
