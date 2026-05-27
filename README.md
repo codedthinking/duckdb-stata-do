@@ -74,7 +74,7 @@ collapse (mean) avg_profit = profit, by(sector);
 list;
 ```
 
-Or run a `.do` file (no semicolons needed inside):
+Commands end with `;` in the DuckDB REPL — this is a DuckDB convention, not a Stata one. Inside `.do` files, each line is one statement and no semicolons are needed:
 
 ```sql
 do "analysis/clean.do";
