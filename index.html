@@ -736,6 +736,51 @@ h1.doc-h1 .mono {
   line-height: 1.45;
 }
 
+/* benefit cards */
+.benefit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 18px;
+  margin: 32px 0 40px 0;
+  max-width: 760px;
+}
+.benefit-card {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 20px 22px;
+  background: var(--bg-elevated);
+  border: var(--bw-2) solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-1);
+}
+.benefit-card__head {
+  display: flex; align-items: center; gap: 8px;
+}
+.benefit-card__name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--accent-deep);
+}
+:root[data-theme="dark"] .benefit-card__name { color: var(--ochre-300); }
+.benefit-card__badge {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  padding: 2px 7px;
+  background: var(--accent-soft);
+  border: var(--bw-1) solid var(--line-soft);
+  border-radius: var(--r-pill);
+  color: var(--fg3);
+}
+.benefit-card__desc {
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  color: var(--fg2);
+  line-height: 1.5;
+}
+@media (max-width: 600px) {
+  .benefit-grid { grid-template-columns: 1fr; }
+}
+
 /* responsive */
 @media (max-width: 1180px) {
   .shell { grid-template-columns: 260px minmax(0,1fr); }
@@ -760,7 +805,7 @@ h1.doc-h1 .mono {
       <span class="brand__name">dodo</span>
       <span class="brand__slash">/</span>
       <span class="brand__docs">docs</span>
-      <span class="brand__version">v0.1.1</span>
+      <span class="brand__version">v0.2.0</span>
     </a>
 
     <div class="topbar__mid">
@@ -865,6 +910,7 @@ h1.doc-h1 .mono {
             <li><a href="#" onclick="return false">summarize</a></li>
             <li><a href="#" onclick="return false">tabulate</a></li>
             <li><a href="#" onclick="return false">history</a></li>
+            <li><a href="#" onclick="return false">show sql</a></li>
           </ul>
         </details>
 
@@ -958,6 +1004,36 @@ h1.doc-h1 .mono {
         <p class="doc-lede">
           dodo is a DuckDB extension that reads legacy <code>.do</code> workflows and executes them on DuckDB, preserving familiar data-cleaning scripts while moving execution to a modern analytical engine.
         </p>
+
+        <h2 id="gs-benefits">why dodo</h2>
+
+        <div class="benefit-grid">
+          <div class="benefit-card">
+            <div class="benefit-card__head">
+              <div class="benefit-card__name">Open source and free</div>
+            </div>
+            <div class="benefit-card__desc">MIT license. Runs anywhere DuckDB runs &mdash; laptop, server, cloud, embedded. No vendor lock-in, no license fees. The compiler and extension will always be open source.</div>
+          </div>
+          <div class="benefit-card">
+            <div class="benefit-card__head">
+              <div class="benefit-card__name">Speed</div>
+            </div>
+            <div class="benefit-card__desc">Your pipeline runs in seconds, not minutes. Fast enough to rerun your entire analysis every time something changes &mdash; a continuous-integration mindset for data work.</div>
+          </div>
+          <div class="benefit-card">
+            <div class="benefit-card__head">
+              <div class="benefit-card__name">Scale</div>
+            </div>
+            <div class="benefit-card__desc">Work with billions of rows in Parquet, connect to databases, and let DuckDB's optimizer do the heavy lifting. Lazy loading means intermediate steps are never computed unnecessarily.</div>
+          </div>
+          <div class="benefit-card">
+            <div class="benefit-card__head">
+              <div class="benefit-card__name">Iterative and reproducible</div>
+              <span class="benefit-card__badge">coming soon</span>
+            </div>
+            <div class="benefit-card__desc">Named checkpoints, unlimited undo/redo, near-real-time feedback as you revise code. The entire pipeline can be recorded and replayed for reproducibility.</div>
+          </div>
+        </div>
 
         <h2 id="gs-install">install in 30 seconds</h2>
         <p>From any DuckDB shell — desktop, CLI, Python, R — the install procedure is the same. dodo is distributed through the DuckDB community extension repository.</p>
@@ -1935,6 +2011,19 @@ _sN <span class="tok-kw">AS</span> (
         <div class="syntax"><span class="cmd">expand</span> <span class="req">n | count_col</span> [, <span class="opt">generate(</span><span class="req">indicator</span><span class="opt">)</span>]</div>
         <div class="codeblock"><div class="codeblock__head"><span class="codeblock__lang">.do</span></div><pre><code><span class="tok-cmd">expand</span> <span class="tok-num">3</span>;                          <span class="tok-com">// triple every row</span>
 <span class="tok-cmd">expand</span> count, generate(copy);     <span class="tok-com">// variable expansion + indicator</span></code></pre></div>
+      </article>
+
+      <!-- ---------- page: show-sql ---------- -->
+      <article class="page" id="page-show-sql" data-screen-label="show sql command">
+        <div class="crumbs"><a href="#getting-started" data-page="getting-started">docs</a><span class="sep">/</span><span class="cur">show sql</span></div>
+        <h1 class="doc-h1"><span class="mono">show sql</span></h1>
+        <p class="doc-lede">Display the generated SQL for the current CTE chain. The output is formatted with indentation and <code>-- [source]</code> comments mapping each step back to the original command.</p>
+        <div class="syntax"><span class="cmd">show</span> <span class="req">sql</span></div>
+        <div class="codeblock"><div class="codeblock__head"><span class="codeblock__lang">.do</span></div><pre><code><span class="tok-cmd">use</span> <span class="tok-str">"firms.csv"</span>, clear;
+<span class="tok-cmd">keep</span> <span class="tok-kw">if</span> year >= <span class="tok-num">2020</span>;
+<span class="tok-cmd">generate</span> profit = revenue - cost;
+<span class="tok-cmd">show</span> sql;</code></pre></div>
+        <p>Control formatting with <code>SET dodo_format_sql = true|false</code> and comments with <code>SET dodo_sql_comments = true|false</code>.</p>
       </article>
 
       <!-- ---------- page: dodoc-overview ---------- -->

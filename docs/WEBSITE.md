@@ -74,11 +74,12 @@ collapse (mean) avg_profit = profit, by(sector);
 list;
 ```
 
-### Three feature cards
+### Four benefit cards (2x2 grid)
 
-1. **Familiar syntax** — Write `keep`, `generate`, `collapse` instead of SQL. Your muscle memory works.
-2. **DuckDB speed** — Parquet, CSV, JSON at analytical engine speed. No row-by-row execution.
-3. **Undo everything** — Made a mistake? `undo`. Changed your mind? `redo`. Full `history` of every step.
+1. **Open source and free** — MIT license. Runs anywhere DuckDB runs — laptop, server, cloud, embedded. No vendor lock-in, no license fees. The compiler and extension will always be open source.
+2. **Speed** — Your pipeline runs in seconds, not minutes. At least 10--20x faster on real-world datasets. Fast enough to rerun your entire analysis every time something changes — a continuous-integration mindset for data work.
+3. **Scale** — Work with billions of rows in Parquet, connect to databases, and let DuckDB's optimizer do the heavy lifting. Lazy loading means data is only read when the result is needed — intermediate steps are never computed unnecessarily.
+4. **Iterative and reproducible** *(coming soon)* — Named checkpoints, unlimited undo/redo, near-real-time feedback as you revise code. The entire pipeline can be recorded and replayed. Experiment freely, then lock it down for reproducibility.
 
 ### Install section
 
@@ -331,6 +332,15 @@ Frequency table or cross-tabulation.
 tabulate sector;
 tabulate sector year;
 ```
+
+#### `show sql`
+Display the generated SQL for the current CTE chain.
+
+```sql
+show sql;
+```
+
+Output: the full formatted SQL query with `-- [source]` comments mapping each CTE step back to the original command.
 
 #### `history`
 Show the command history for the current session.
