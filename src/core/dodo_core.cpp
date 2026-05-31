@@ -328,7 +328,7 @@ string FileReadFunction(const string &filename) {
 	} else if (str::EndsWith(lower, ".parquet")) {
 		return "read_parquet('" + filename + "')";
 	} else if (str::EndsWith(lower, ".dta")) {
-		return "st_read('" + filename + "')";
+		return "read_dta('" + filename + "')";
 	} else if (str::EndsWith(lower, ".json")) {
 		return "read_json('" + filename + "')";
 	}

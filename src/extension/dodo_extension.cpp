@@ -1,6 +1,7 @@
 #define DUCKDB_EXTENSION_MAIN
 
 #include "dodo_extension.hpp"
+#include "read_dta_function.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -261,6 +262,9 @@ BoundStatement dodo_bind(ClientContext &context, Binder &binder, OperatorExtensi
 //===--------------------------------------------------------------------===//
 
 static void LoadInternal(ExtensionLoader &loader) {
+	// Register read_dta table function
+	loader.RegisterFunction(GetReadDtaFunction());
+
 	auto &instance = loader.GetDatabaseInstance();
 	auto &config = DBConfig::GetConfig(instance);
 
