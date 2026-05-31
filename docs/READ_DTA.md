@@ -146,7 +146,7 @@ Registers `read_dta(path VARCHAR)` with optional named parameters:
 | strL (32768) | — | VARCHAR |
 | any numeric | — with value_labels=true and label exists | ENUM |
 
-Missing values (sentinels above valid max) → NULL for all numeric types.
+Missing values (sentinels above valid max) → NULL for all numeric types. Stata has 27 missing value codes (`.`, `.a`–`.z`) per type; currently all are mapped to a single NULL. Future enhancement: preserve extended missing value codes (e.g. as a separate column or metadata).
 
 Date conversion: Stata epoch is 1960-01-01. For %td: `duckdb_date = stata_days - 3653`. For %tc: stata milliseconds since 1960 → microseconds since 1970.
 

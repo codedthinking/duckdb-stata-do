@@ -2023,6 +2023,8 @@ string ProcessCommand(const DodoCommand &cmd, DodoState &state) {
 			format_clause = " (FORMAT CSV, HEADER)";
 		} else if (str::EndsWith(lower_fn, ".parquet")) {
 			format_clause = " (FORMAT PARQUET)";
+		} else if (str::EndsWith(lower_fn, ".dta")) {
+			format_clause = " (FORMAT DTA)";
 		}
 		return "COPY (" + state.BuildQuery("SELECT * FROM " + prev) + ") TO '" + target + "'" + format_clause;
 	}

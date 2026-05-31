@@ -18,7 +18,9 @@ set(EXTENSION_SOURCES
     src/extension/dodo_extension.cpp
     src/core/dodo_core.cpp
     src/dta/dta_reader.cpp
-    src/dta/read_dta_function.cpp)
+    src/dta/read_dta_function.cpp
+    src/dta/dta_writer.cpp
+    src/dta/write_dta_function.cpp)
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
