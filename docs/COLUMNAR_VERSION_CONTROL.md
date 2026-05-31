@@ -108,9 +108,21 @@ hash is `H(sorted_parent_hashes + sql)`, so it encodes the full lineage
 of every input. Two users who run the same commands on the same inputs
 get the same hashes -- a Merkle DAG.
 
-Most commands have one parent (the previous step in the chain). `merge`
-has two parents: the current dataframe and the `using` file. Root commits
-(from `use "file.csv"`) have zero parents.
+Parent commits are derived automatically from the SQL AST. Parsing the
+generated SQL with `json_serialize_sql()` exposes all table references
+in the `from_table` nodes (type `BASE_TABLE`, field `table_name`). Each
+referenced table that maps to a known branch or CTE step becomes a
+parent edge. This replaces hardcoded per-command parent logic:
+
+- A query referencing only `_dodo_data` (the current HEAD view) has one
+  parent: the current HEAD commit.
+- A query joining `_dodo_data` with another branch's view or an external
+  file has two parents.
+- A `use "file.csv"` that references no existing tables has zero parents
+  (root commit).
+
+This means the DAG structure is derived from the SQL itself, not from
+command type conventions.
 
 The parent pointers form a DAG. Linear history is a chain. Branching
 creates a fork (two commits share the same parent). Merging creates a
@@ -191,10 +203,11 @@ CREATE TABLE IF NOT EXISTS dodo.commits (
     created_at   TIMESTAMPTZ DEFAULT now()
 );
 
--- Parent edges. Most commits have one parent. Merge commits have two.
+-- Parent edges, derived from table references in the SQL AST.
+-- Most commits have one parent. Joins across branches have two.
 -- Root commits (file loads) have zero rows here.
--- parent_index: 0 = primary parent (the CTE chain predecessor),
---               1 = secondary parent (the merge "using" input), etc.
+-- parent_index: 0 = primary parent (first table reference),
+--               1 = secondary parent (second table reference), etc.
 CREATE TABLE IF NOT EXISTS dodo.commit_parents (
     commit_hash  VARCHAR NOT NULL REFERENCES dodo.commits(hash),
     parent_hash  VARCHAR NOT NULL REFERENCES dodo.commits(hash),
@@ -306,23 +319,57 @@ Since each parent hash encodes its own full ancestry, the commit hash is
 a Merkle DAG: changing any ancestor changes all descendant hashes. Two
 users who run the same commands on the same inputs get the same hashes.
 
-### SQL canonicalization
+### SQL analysis with `json_serialize_sql()`
 
-DuckDB's `EXPLAIN` output gives a stable logical plan string for
-semantically identical queries (ignoring whitespace, alias differences).
-Use this as the canonical form before hashing:
+DuckDB's `json_serialize_sql()` parses SQL into a JSON AST. This serves
+two purposes: canonicalization and dependency extraction.
 
-```cpp
-std::string CanonicalizeSql(duckdb::Connection &con, const std::string &sql) {
-    auto result = con.Query("EXPLAIN " + sql);
-    // read first column of first row -- the logical plan string
-    return result->GetValue(0, 0).ToString();
-}
+#### Canonicalization
+
+Round-tripping through `json_deserialize_sql(json_serialize_sql(sql))`
+produces a canonical form: explicit keywords, consistent casing,
+normalized whitespace. For example, `from services limit 5` becomes
+`SELECT * FROM services LIMIT 5`.
+
+Use the round-tripped SQL as the canonical form before hashing:
+
+```sql
+SELECT sha256(
+    parent_hash || E'\0' ||
+    json_deserialize_sql(json_serialize_sql(sql_text))
+) AS hash
 ```
 
-If `EXPLAIN` canonicalization proves unreliable or too costly, fall back
-to storing and hashing the raw SQL text. Correctness does not depend on
+This is a syntactic normalization, not a semantic one: different column
+orders or alias names produce different hashes, which is correct since
+they produce different dataframes. Correctness does not depend on
 perfect canonicalization -- it only affects deduplication.
+
+#### Dependency extraction (parent detection)
+
+The same JSON AST exposes all table references in the query. Nodes with
+`"type": "BASE_TABLE"` contain a `"table_name"` field. Extracting these
+gives the set of tables a transform reads from:
+
+```sql
+-- Extract table references from a query's AST
+SELECT DISTINCT json_extract_string(node, '$.table_name') AS table_name
+FROM (
+    SELECT unnest(
+        json_extract(json_serialize_sql(sql_text), '$.statements[*].node.from_table')
+    ) AS node
+)
+WHERE json_extract_string(node, '$.type') = 'BASE_TABLE';
+```
+
+Each referenced table that maps to a known dodo object (branch view,
+CTE step name, or external file) becomes a parent edge in
+`dodo.commit_parents`. This replaces hardcoded per-command parent logic
+-- the DAG structure is derived from the SQL itself.
+
+For joins and subqueries, the AST contains nested `from_table` nodes
+that can be extracted recursively. The extraction query may need to walk
+`join` nodes and subselects to collect all table references.
 
 ---
 
@@ -362,17 +409,21 @@ ProcessCommand()            -- generate SQL, call AddStep()
 AddStep(inner_sql)
     |
     v
+* parse SQL AST             -- json_serialize_sql(inner_sql)
+*   extract table refs      -- find BASE_TABLE nodes -> parent commits
+    |
+    v
 * head_has_children()?      -- does current HEAD have child commits?
 *   YES -> auto_branch()    -- create new branch before committing
     |
     v
-* compute commit hash       -- SHA-256(sorted parents + sql)
+* compute commit hash       -- SHA-256(sorted parents + canonical sql)
     |
     v
 * INSERT INTO dodo.commits  -- persist the commit
     |
     v
-* INSERT INTO dodo.commit_parents -- record parent edge(s)
+* INSERT INTO dodo.commit_parents -- record parent edges from AST
     |
     v
 * UPDATE dodo.branches      -- advance current branch target
@@ -619,16 +670,17 @@ This preserves backward compatibility for users querying `dodo._history`.
    initialization.
 2. On `use` (root commit): INSERT into `dodo.commits` with no parent
    edges.
-3. On each `AddStep()`: INSERT into `dodo.commits`, then INSERT into
-   `dodo.commit_parents` with parent = previous commit hash
-   (parent_index=0). For `merge`, also insert the secondary parent
-   (parent_index=1).
-4. Compute commit hash using DuckDB's built-in `sha256()` function:
+3. On each `AddStep()`: parse the SQL with `json_serialize_sql()`,
+   extract all `BASE_TABLE` references from the AST, resolve each to
+   a parent commit hash, INSERT into `dodo.commits`, then INSERT into
+   `dodo.commit_parents` with one row per resolved parent.
+4. Compute commit hash using DuckDB's built-in `sha256()` and
+   `json_serialize_sql()` functions for canonicalization:
    ```sql
    -- single parent (most commands):
-   SELECT sha256(parent_hash || E'\0' || sql_text) AS hash
+   SELECT sha256(parent_hash || E'\0' || json_deserialize_sql(json_serialize_sql(sql_text))) AS hash
    -- two parents (merge):
-   SELECT sha256(least(p1, p2) || E'\0' || greatest(p1, p2) || E'\0' || sql_text) AS hash
+   SELECT sha256(least(p1, p2) || E'\0' || greatest(p1, p2) || E'\0' || json_deserialize_sql(json_serialize_sql(sql_text))) AS hash
    -- root (no parents):
    SELECT sha256(E'\0' || source_description) AS hash
    ```
