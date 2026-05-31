@@ -24,7 +24,8 @@ Read `BRANDING.md` for visual identity, color palette, typography, and logo dire
 /docs/ui/               → DuckDB UI integration (live view, history table)
 /docs/how-it-works/     → CTE chain architecture, materialization, lazy mode
 /docs/migration/        → Guide for Stata users moving to dodo
-/docs/limitations/      → Known gaps, .dta support, keyword conflicts
+/docs/limitations/      → Known gaps, keyword conflicts
+/docs/dta/              → .dta file format support (read_dta, COPY TO FORMAT dta)
 ```
 
 Each command reference page should follow a consistent template:
@@ -77,7 +78,7 @@ list;
 ### Three feature cards
 
 1. **Familiar syntax** — Write `keep`, `generate`, `collapse` instead of SQL. Your muscle memory works.
-2. **DuckDB speed** — Parquet, CSV, JSON at analytical engine speed. No row-by-row execution.
+2. **DuckDB speed** — Parquet, CSV, JSON, and `.dta` at analytical engine speed. Native `.dta` reader — no Stata license needed.
 3. **Undo everything** — Made a mistake? `undo`. Changed your mind? `redo`. Full `history` of every step.
 
 ### Install section
@@ -102,21 +103,23 @@ cd dodo && make release
 ### Data I/O
 
 #### `use`
-Load data from a file or table. Materializes into `dodo._current` by default.
+Load data from a file or table. Materializes into `dodo._current` by default. Variable labels are automatically read from `.dta` files.
 
 ```sql
 use "data/firms.csv", clear;
 use "data/firms.parquet", clear;
+use "data/firms.dta", clear;      -- native .dta reader (formats 117-121)
 use existing_table, clear;
 use "data/firms.csv", lazy;       -- no materialization, CTE-only
 ```
 
 #### `save`
-Write the current data to disk or to an in-memory table.
+Write the current data to disk or to an in-memory table. Variable labels are preserved in `.dta` output.
 
 ```sql
 save "output.csv", replace;
 save "output.parquet", replace;
+save "output.dta", replace;       -- native .dta writer (format 118)
 save my_table, replace table;     -- in-memory DuckDB table
 ```
 
@@ -493,6 +496,63 @@ do "analysis/clean.do";
 ```
 
 Terminal commands inside `.do` files are skipped — inspect results interactively after the script finishes.
+
+---
+
+## .dta file support — for the dta page
+
+dodo includes a native `.dta` file reader and writer. No external dependencies — no ReadStat, no Python, no Stata license.
+
+### Reading `.dta` files
+
+From dodo commands:
+
+```sql
+use "data/panel.dta", clear;
+codebook;    -- variable labels from the .dta file appear here
+```
+
+From plain SQL (the `read_dta` table function):
+
+```sql
+SELECT * FROM read_dta('data/panel.dta');
+SELECT * FROM read_dta('data/panel.dta', value_labels=true);  -- ENUM types
+```
+
+### Writing `.dta` files
+
+From dodo commands:
+
+```sql
+use "data/firms.csv", clear;
+label variable revenue "Annual revenue in USD";
+save "output.dta";
+```
+
+From plain SQL:
+
+```sql
+COPY my_table TO 'output.dta' (FORMAT dta);
+```
+
+### Supported formats
+
+| Format | Stata version | Status |
+|---|---|---|
+| 117 | Stata 13 | Read |
+| 118 | Stata 14–18 | Read + Write |
+| 119 | Stata 15–18 (>32K vars) | Read |
+| 120 | Stata 18 (alias vars) | Read |
+| 121 | Stata 18 (alias + >32K) | Read |
+
+### What's preserved in round-trips
+
+- All numeric types (byte, int, long, float, double)
+- Strings (str1–str2045 and strL)
+- Missing values (all 27 codes → NULL)
+- Variable labels (via column comments)
+- Value labels (via ENUM types with `value_labels=true`)
+- Date and datetime formats (%td, %tc)
 
 ---
 
