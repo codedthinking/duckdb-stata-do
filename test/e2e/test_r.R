@@ -1,27 +1,17 @@
 # E2E test: R DBI client with dodo extension
 library(DBI)
 library(duckdb)
+library(jsonlite)
 
 args <- commandArgs(trailingOnly = TRUE)
 project_dir <- if (length(args) > 0) args[1] else getwd()
 ext_path <- file.path(project_dir, "build", "release", "extension", "dodo", "dodo.duckdb_extension")
+data_dir <- file.path(project_dir, "test", "data")
+cases_path <- file.path(dirname(sys.frame(1)$ofile), "cases.json")
 
 if (!file.exists(ext_path)) {
     cat("FAIL: Extension not found at", ext_path, "\n")
     quit(status = 1)
-}
-
-failures <- 0L
-
-run_test <- function(name, expr) {
-    tryCatch({
-        eval(expr)
-        cat("  PASS:", name, "\n")
-    }, error = function(e) {
-        cat("  FAIL:", name, "\n")
-        cat("   ", conditionMessage(e), "\n")
-        failures <<- failures + 1L
-    })
 }
 
 fresh_conn <- function() {
@@ -31,77 +21,52 @@ fresh_conn <- function() {
     con
 }
 
-data_path <- file.path(project_dir, "test", "data", "firms.csv")
+check_expect <- function(expect, result) {
+    t <- expect$type
+    if (t == "scalar") {
+        stopifnot(result[[1]][1] == expect$value)
+    } else if (t == "contains_column") {
+        col <- if (is.character(expect$column)) expect$column else names(result)[expect$column + 1]
+        values <- result[[col]]
+        for (inc in expect$includes) stopifnot(inc %in% values)
+        for (exc in expect$excludes) stopifnot(!(exc %in% values))
+    } else if (t == "cell") {
+        col <- if (is.character(expect$column)) expect$column else names(result)[expect$column + 1]
+        stopifnot(result[[col]][expect$row + 1] == expect$value)
+    } else if (t == "row_count_and_cell") {
+        stopifnot(nrow(result) == expect$row_count)
+        col <- if (is.character(expect$column)) expect$column else names(result)[expect$column + 1]
+        stopifnot(result[[col]][expect$row + 1] == expect$value)
+    }
+}
 
+cases <- fromJSON(cases_path, simplifyVector = FALSE)
+
+failures <- 0L
 cat("=== R e2e tests ===\n")
 
-run_test("use + count", {
-    con <- fresh_conn()
-    dbExecute(con, sprintf('use "%s", clear', data_path))
-    result <- dbGetQuery(con, "count")
-    stopifnot(result[[1]] == 5)
-    dbDisconnect(con, shutdown = TRUE)
-})
-
-run_test("keep if + count", {
-    con <- fresh_conn()
-    dbExecute(con, sprintf('use "%s", clear', data_path))
-    dbExecute(con, "keep if year == 2018")
-    result <- dbGetQuery(con, "count")
-    stopifnot(result[[1]] == 3)
-    dbDisconnect(con, shutdown = TRUE)
-})
-
-run_test("list after keep", {
-    con <- fresh_conn()
-    dbExecute(con, sprintf('use "%s", clear', data_path))
-    dbExecute(con, "keep if year == 2018")
-    result <- dbGetQuery(con, "list")
-    stopifnot("Beta" %in% result$name)
-    stopifnot(!("Acme" %in% result$name))
-    dbDisconnect(con, shutdown = TRUE)
-})
-
-run_test("generate", {
-    con <- fresh_conn()
-    dbExecute(con, sprintf('use "%s", clear', data_path))
-    dbExecute(con, "generate double_revenue = revenue * 2")
-    dbExecute(con, "keep if id == 1")
-    result <- dbGetQuery(con, "list")
-    stopifnot(result$double_revenue[1] == 2000)
-    dbDisconnect(con, shutdown = TRUE)
-})
-
-run_test("describe", {
-    con <- fresh_conn()
-    dbExecute(con, sprintf('use "%s", clear', data_path))
-    result <- dbGetQuery(con, "describe")
-    stopifnot("revenue" %in% result[[1]])
-    dbDisconnect(con, shutdown = TRUE)
-})
-
-run_test("summarize", {
-    con <- fresh_conn()
-    dbExecute(con, sprintf('use "%s", clear', data_path))
-    result <- dbGetQuery(con, "summarize revenue")
-    stopifnot(result$mean[1] == 1600.0)
-    dbDisconnect(con, shutdown = TRUE)
-})
-
-run_test("inline data + use table", {
-    con <- fresh_conn()
-    dbExecute(con, "CREATE TABLE t AS SELECT 2020 AS year, 1 AS x UNION ALL SELECT 2021 AS year, 2 AS x")
-    dbExecute(con, "use t")
-    dbExecute(con, "keep if year == 2020")
-    result <- dbGetQuery(con, "list")
-    stopifnot(nrow(result) == 1)
-    stopifnot(result$x[1] == 1)
-    dbDisconnect(con, shutdown = TRUE)
-})
+for (case in cases) {
+    tryCatch({
+        con <- fresh_conn()
+        if (!is.null(case$setup)) dbExecute(con, case$setup)
+        cmds <- unlist(case$commands)
+        for (cmd in cmds[-length(cmds)]) {
+            dbExecute(con, gsub("\\{data\\}", data_dir, cmd))
+        }
+        last_cmd <- gsub("\\{data\\}", data_dir, cmds[length(cmds)])
+        result <- dbGetQuery(con, last_cmd)
+        check_expect(case$expect, result)
+        dbDisconnect(con, shutdown = TRUE)
+        cat("  PASS:", case$name, "\n")
+    }, error = function(e) {
+        cat("  FAIL:", case$name, "\n")
+        cat("   ", conditionMessage(e), "\n")
+        failures <<- failures + 1L
+    })
+}
 
 if (failures > 0) {
     cat(sprintf("=== %d test(s) FAILED ===\n", failures))
     quit(status = 1)
 }
-
 cat("=== All R tests passed ===\n")

@@ -1,0 +1,38 @@
+[
+  {
+    "name": "use + count",
+    "commands": ["use \"{data}/firms.csv\", clear", "count"],
+    "expect": {"type": "scalar", "value": 5}
+  },
+  {
+    "name": "keep if + count",
+    "commands": ["use \"{data}/firms.csv\", clear", "keep if year == 2018", "count"],
+    "expect": {"type": "scalar", "value": 3}
+  },
+  {
+    "name": "list after keep",
+    "commands": ["use \"{data}/firms.csv\", clear", "keep if year == 2018", "list"],
+    "expect": {"type": "contains_column", "column": "name", "includes": ["Beta"], "excludes": ["Acme"]}
+  },
+  {
+    "name": "generate",
+    "commands": ["use \"{data}/firms.csv\", clear", "generate double_revenue = revenue * 2", "keep if id == 1", "list"],
+    "expect": {"type": "cell", "column": "double_revenue", "row": 0, "value": 2000}
+  },
+  {
+    "name": "describe",
+    "commands": ["use \"{data}/firms.csv\", clear", "describe"],
+    "expect": {"type": "contains_column", "column": 0, "includes": ["revenue"]}
+  },
+  {
+    "name": "summarize",
+    "commands": ["use \"{data}/firms.csv\", clear", "summarize revenue"],
+    "expect": {"type": "cell", "column": "mean", "row": 0, "value": 1600.0}
+  },
+  {
+    "name": "inline data + use table",
+    "setup": "CREATE TABLE t AS SELECT 2020 AS year, 1 AS x UNION ALL SELECT 2021 AS year, 2 AS x",
+    "commands": ["use t", "keep if year == 2020", "list"],
+    "expect": {"type": "row_count_and_cell", "row_count": 1, "column": "x", "row": 0, "value": 1}
+  }
+]

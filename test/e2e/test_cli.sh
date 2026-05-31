@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # E2E test: DuckDB CLI with dodo extension
+# Test cases are defined in cases.json; this script runs each via the CLI.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DUCKDB="$PROJECT_DIR/build/release/duckdb"
+CASES="$SCRIPT_DIR/cases.json"
+DATA_DIR="$PROJECT_DIR/test/data"
 
 if [ ! -x "$DUCKDB" ]; then
     echo "FAIL: DuckDB binary not found at $DUCKDB"
@@ -12,64 +15,71 @@ if [ ! -x "$DUCKDB" ]; then
 fi
 
 FAILURES=0
-
-run_test() {
-    local name="$1"
-    local input="$2"
-    local expected="$3"
-
-    actual=$(echo "$input" | "$DUCKDB" -noheader -list 2>&1) || true
-    if echo "$actual" | grep -qF "$expected"; then
-        echo "  PASS: $name"
-    else
-        echo "  FAIL: $name"
-        echo "    expected to contain: $expected"
-        echo "    actual: $actual"
-        FAILURES=$((FAILURES + 1))
-    fi
-}
+N_CASES=$(jq length "$CASES")
 
 echo "=== DuckDB CLI e2e tests ==="
 
-# Test 1: use + count
-run_test "use + count" \
-    "use \"$PROJECT_DIR/test/data/firms.csv\", clear;
-count;" \
-    "5"
+for i in $(seq 0 $((N_CASES - 1))); do
+    name=$(jq -r ".[$i].name" "$CASES")
+    setup=$(jq -r ".[$i].setup // empty" "$CASES")
+    # Build input: setup SQL + commands, each terminated with semicolon
+    input=""
+    if [ -n "$setup" ]; then
+        input+="$setup;"$'\n'
+    fi
+    while IFS= read -r cmd; do
+        cmd="${cmd//\{data\}/$DATA_DIR}"
+        input+="$cmd;"$'\n'
+    done < <(jq -r ".[$i].commands[]" "$CASES")
 
-# Test 2: use + keep if + count
-run_test "use + keep if + count" \
-    "use \"$PROJECT_DIR/test/data/firms.csv\", clear;
-keep if year == 2018;
-count;" \
-    "3"
+    actual=$(echo "$input" | "$DUCKDB" -noheader -list 2>&1) || true
 
-# Test 3: use + keep if + list returns expected rows
-run_test "use + keep if + list shows Beta" \
-    "use \"$PROJECT_DIR/test/data/firms.csv\", clear;
-keep if year == 2018;
-list;" \
-    "Beta"
+    # Check expectations based on type
+    expect_type=$(jq -r ".[$i].expect.type" "$CASES")
+    ok=true
 
-# Test 4: generate + list
-run_test "generate new column" \
-    "use \"$PROJECT_DIR/test/data/firms.csv\", clear;
-generate double_revenue = revenue * 2;
-keep if id == 1;
-list;" \
-    "2000"
+    case "$expect_type" in
+        scalar)
+            expected=$(jq -r ".[$i].expect.value" "$CASES")
+            # The last line of output should contain the scalar value
+            if ! echo "$actual" | grep -qF "$expected"; then
+                ok=false
+            fi
+            ;;
+        contains_column)
+            for inc in $(jq -r ".[$i].expect.includes[]" "$CASES" 2>/dev/null); do
+                if ! echo "$actual" | grep -qF "$inc"; then
+                    ok=false
+                fi
+            done
+            for exc in $(jq -r ".[$i].expect.excludes[]" "$CASES" 2>/dev/null); do
+                if echo "$actual" | grep -qF "$exc"; then
+                    ok=false
+                fi
+            done
+            ;;
+        cell)
+            expected=$(jq -r ".[$i].expect.value" "$CASES")
+            if ! echo "$actual" | grep -qF "$expected"; then
+                ok=false
+            fi
+            ;;
+        row_count_and_cell)
+            expected=$(jq -r ".[$i].expect.value" "$CASES")
+            if ! echo "$actual" | grep -qF "$expected"; then
+                ok=false
+            fi
+            ;;
+    esac
 
-# Test 5: describe
-run_test "describe shows columns" \
-    "use \"$PROJECT_DIR/test/data/firms.csv\", clear;
-describe;" \
-    "revenue"
-
-# Test 6: summarize
-run_test "summarize shows mean" \
-    "use \"$PROJECT_DIR/test/data/firms.csv\", clear;
-summarize revenue;" \
-    "1600"
+    if $ok; then
+        echo "  PASS: $name"
+    else
+        echo "  FAIL: $name"
+        echo "    actual: $actual"
+        FAILURES=$((FAILURES + 1))
+    fi
+done
 
 if [ "$FAILURES" -gt 0 ]; then
     echo "=== $FAILURES test(s) FAILED ==="

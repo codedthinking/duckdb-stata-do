@@ -5,21 +5,15 @@ const fs = require("fs");
 
 const PROJECT_DIR = path.resolve(__dirname, "..", "..");
 const EXT_PATH = path.join(
-  PROJECT_DIR,
-  "build",
-  "release",
-  "extension",
-  "dodo",
-  "dodo.duckdb_extension",
+  PROJECT_DIR, "build", "release", "extension", "dodo", "dodo.duckdb_extension",
 );
-const DATA_PATH = path.join(PROJECT_DIR, "test", "data", "firms.csv");
+const DATA_DIR = path.join(PROJECT_DIR, "test", "data");
+const CASES_PATH = path.join(__dirname, "cases.json");
 
 if (!fs.existsSync(EXT_PATH)) {
   console.log(`FAIL: Extension not found at ${EXT_PATH}`);
   process.exit(1);
 }
-
-let failures = 0;
 
 function freshConn() {
   return new Promise((resolve, reject) => {
@@ -52,100 +46,66 @@ function query(con, sql) {
   });
 }
 
-async function runTest(name, fn) {
-  try {
-    await fn();
-    console.log(`  PASS: ${name}`);
-  } catch (e) {
-    console.log(`  FAIL: ${name}`);
-    console.log(`    ${e.message}`);
-    failures++;
-  }
-}
-
 function assert(condition, msg) {
   if (!condition) throw new Error(msg);
 }
 
+function checkExpect(expect, rows) {
+  const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
+  const t = expect.type;
+
+  if (t === "scalar") {
+    const val = Object.values(rows[0])[0];
+    assert(val === expect.value, `expected ${expect.value}, got ${val}`);
+  } else if (t === "contains_column") {
+    const col = typeof expect.column === "string" ? expect.column : columns[expect.column];
+    const values = rows.map((r) => r[col]);
+    for (const inc of expect.includes || [])
+      assert(values.includes(inc), `expected ${inc} in ${JSON.stringify(values)}`);
+    for (const exc of expect.excludes || [])
+      assert(!values.includes(exc), `unexpected ${exc} in ${JSON.stringify(values)}`);
+  } else if (t === "cell") {
+    const col = typeof expect.column === "string" ? expect.column : columns[expect.column];
+    assert(rows[expect.row][col] === expect.value,
+      `expected ${expect.value}, got ${rows[expect.row][col]}`);
+  } else if (t === "row_count_and_cell") {
+    assert(rows.length === expect.row_count,
+      `expected ${expect.row_count} rows, got ${rows.length}`);
+    const col = typeof expect.column === "string" ? expect.column : columns[expect.column];
+    assert(rows[expect.row][col] === expect.value,
+      `expected ${expect.value}, got ${rows[expect.row][col]}`);
+  }
+}
+
+async function runCase(testCase) {
+  const { con } = await freshConn();
+  if (testCase.setup) await exec(con, testCase.setup);
+  const cmds = testCase.commands.map((c) => c.replace(/\{data\}/g, DATA_DIR));
+  for (const cmd of cmds.slice(0, -1)) await exec(con, cmd);
+  const rows = await query(con, cmds[cmds.length - 1]);
+  checkExpect(testCase.expect, rows);
+}
+
 async function main() {
+  const cases = JSON.parse(fs.readFileSync(CASES_PATH, "utf8"));
+  let failures = 0;
+
   console.log("=== Node.js e2e tests ===");
-
-  await runTest("use + count", async () => {
-    const { con } = await freshConn();
-    await exec(con, `use "${DATA_PATH}", clear`);
-    const rows = await query(con, "count");
-    assert(
-      Object.values(rows[0])[0] === 5,
-      `expected 5, got ${Object.values(rows[0])[0]}`,
-    );
-  });
-
-  await runTest("keep if + count", async () => {
-    const { con } = await freshConn();
-    await exec(con, `use "${DATA_PATH}", clear`);
-    await exec(con, "keep if year == 2018");
-    const rows = await query(con, "count");
-    assert(
-      Object.values(rows[0])[0] === 3,
-      `expected 3, got ${Object.values(rows[0])[0]}`,
-    );
-  });
-
-  await runTest("list after keep", async () => {
-    const { con } = await freshConn();
-    await exec(con, `use "${DATA_PATH}", clear`);
-    await exec(con, "keep if year == 2018");
-    const rows = await query(con, "list");
-    const names = rows.map((r) => r.name);
-    assert(names.includes("Beta"), `expected Beta in ${names}`);
-    assert(!names.includes("Acme"), `Acme should be filtered out`);
-  });
-
-  await runTest("generate", async () => {
-    const { con } = await freshConn();
-    await exec(con, `use "${DATA_PATH}", clear`);
-    await exec(con, "generate double_revenue = revenue * 2");
-    await exec(con, "keep if id == 1");
-    const rows = await query(con, "list");
-    assert(
-      rows[0].double_revenue === 2000,
-      `expected 2000, got ${rows[0].double_revenue}`,
-    );
-  });
-
-  await runTest("describe", async () => {
-    const { con } = await freshConn();
-    await exec(con, `use "${DATA_PATH}", clear`);
-    const rows = await query(con, "describe");
-    const colNames = rows.map((r) => Object.values(r)[0]);
-    assert(colNames.includes("revenue"), `expected revenue in ${colNames}`);
-  });
-
-  await runTest("summarize", async () => {
-    const { con } = await freshConn();
-    await exec(con, `use "${DATA_PATH}", clear`);
-    const rows = await query(con, "summarize revenue");
-    assert(rows[0].mean === 1600.0, `expected mean 1600, got ${rows[0].mean}`);
-  });
-
-  await runTest("inline data + use table", async () => {
-    const { con } = await freshConn();
-    await exec(
-      con,
-      "CREATE TABLE t AS SELECT 2020 AS year, 1 AS x UNION ALL SELECT 2021 AS year, 2 AS x",
-    );
-    await exec(con, "use t");
-    await exec(con, "keep if year == 2020");
-    const rows = await query(con, "list");
-    assert(rows.length === 1, `expected 1 row, got ${rows.length}`);
-    assert(rows[0].x === 1, `expected x=1, got ${rows[0].x}`);
-  });
+  for (const testCase of cases) {
+    try {
+      await runCase(testCase);
+      console.log(`  PASS: ${testCase.name}`);
+    } catch (e) {
+      console.log(`  FAIL: ${testCase.name}`);
+      console.log(`    ${e.message}`);
+      failures++;
+    }
+  }
 
   if (failures > 0) {
     console.log(`=== ${failures} test(s) FAILED ===`);
     process.exit(1);
   }
-
   console.log("=== All Node.js tests passed ===");
 }
 
