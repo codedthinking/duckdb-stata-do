@@ -131,6 +131,61 @@ impossible — rewrite set-based (see VARIABLE_SUBSTITUTION.md §B.3)."*
 These cannot be known while compiling. Instead of fetching them, dodo **rewrites
 each one into the SQL** so DuckDB computes it. There is no execution round-trip.
 
+### B.0 The kind of a name is a property of its *definition*, not its use
+
+Whether a name is compile-time or runtime **cannot be decided from the line that
+uses it.** Consider:
+
+```stata
+summarize employment           // r(min) recorded against _s3
+scalar min_employment = r(min) // <-- this makes min_employment RUNTIME
+keep if employment > min_employment
+```
+
+Looking at `keep if employment > min_employment` in isolation, `min_employment` is
+indistinguishable from a column. It is runtime only *because* of how it was
+defined two lines earlier. So the compiler must carry a **compile-time symbol
+table** — a namespace that records, for every macro/scalar it has seen, which
+**kind** it is and what it expands to:
+
+```
+kind ∈ { LITERAL,  RUNTIME }
+       (compile-time text)  (SQL fragment / subquery)
+```
+
+| | `LITERAL` | `RUNTIME` |
+|---|---|---|
+| stored value | raw text (`"age educ"`, `"2020"`) | an SQL fragment (`(SELECT min(employment) FROM _s3)`) |
+| resolved by | textual substitution (Category A) | expression translation (this section) |
+| set by | `local x text`, `scalar x = const`, foldable `= exp` | RHS that touches **any** runtime symbol |
+
+**Taint propagation.** A definition is `RUNTIME` **iff its right-hand side, after
+expansion, references at least one runtime symbol** — `r(...)`, `e(...)`, a
+`levelsof` list, or a name already bound `RUNTIME`. The taint is transitive and
+the fragment composes:
+
+```stata
+scalar min_employment = r(min)      // RUNTIME: (SELECT min(employment) FROM _s3)
+scalar floor = min_employment - 1   // RUNTIME: ((SELECT min(employment) FROM _s3) - 1)
+local big = floor * 2               // RUNTIME: (((SELECT ...) - 1) * 2)
+```
+
+Everything else (`local controls age educ`, `scalar pi = 3.14159`,
+`local n2 = 4*4`) stays `LITERAL` and is handled by Category A.
+
+**Name resolution at a use site.** When translating an expression, a bare
+identifier is looked up in the scalar namespace first: if it is a known `RUNTIME`
+scalar, substitute its fragment; if a known `LITERAL` scalar, substitute its
+literal; otherwise treat it as a **column reference** and leave it alone. (Stata
+lets a variable and a scalar share a name; dodo resolves scalar-table hits first
+and the docs recommend distinct names to avoid surprise.) Delimited macro refs
+`` `x' ``/`$x` are still resolved in the textual pass — but a `RUNTIME` macro
+pastes its *SQL fragment text*, which then flows into expression translation as a
+subquery, so the two namespaces meet cleanly.
+
+This symbol table is the single source of truth for the A-vs-B decision; the rest
+of Category B (`r()`, `levelsof`) just *populates* it.
+
 ### B.1 Stored results `r()` become SQL subqueries
 
 When the compiler processes an r-class terminal command, it records, in state, a
@@ -173,12 +228,13 @@ r-class command was `count`."*
 
 ### B.2 Scalars and macros bound to runtime values
 
-`scalar hi = r(max)` or `local hi = r(max)` does not store a number — it stores the
-**SQL fragment** that `r(max)` currently maps to (snapshotted at definition time).
-A later bare reference to `hi` (scalar) or `` `hi' `` (macro) expands to that
-fragment. This unifies scalars and macros under the same "name → SQL fragment"
-mechanism; the only difference from Category A is that the bound text is a subquery
-rather than a literal.
+`scalar hi = r(max)` or `local hi = r(max)` does not store a number — it records a
+`RUNTIME` symbol (§B.0) whose value is the **SQL fragment** that `r(max)` currently
+maps to, snapshotted at definition time. A later bare reference to `hi` (scalar) or
+`` `hi' `` (macro) expands to that fragment. Scalars and macros thus share one
+symbol-table mechanism; the only difference from Category A is the `kind` flag —
+`RUNTIME` symbols carry a subquery, `LITERAL` symbols carry text — and the
+resolution site (expression translation vs the textual pass).
 
 ### B.3 `levelsof` and set-based rewrites
 
@@ -239,13 +295,23 @@ documented boundary, not a bug.
 
 ## State changes (`DodoState`)
 
-```cpp
-// --- Category A: compile-time textual macros ---
-std::unordered_map<std::string, std::string> locals;   // name -> literal text
-std::unordered_map<std::string, std::string> globals;  // name -> literal text
+Every macro/scalar lives in one symbol table whose entries carry the kind flag
+from §B.0, so the A-vs-B decision is a single lookup:
 
-// --- Category B: name -> SQL fragment (literal OR subquery) ---
-std::unordered_map<std::string, std::string> scalars;        // scalar name -> SQL expr
+```cpp
+enum class BindingKind { LITERAL, RUNTIME };
+
+struct Symbol {
+    BindingKind kind;   // LITERAL = compile-time text; RUNTIME = SQL fragment
+    std::string value;  // raw text  (LITERAL)  |  "(SELECT max(x) FROM _s3)"  (RUNTIME)
+};
+
+// the three Stata namespaces, each a name -> Symbol map
+std::unordered_map<std::string, Symbol> locals;   // `x'    (do-file / loop scoped)
+std::unordered_map<std::string, Symbol> globals;  // $x     (session)
+std::unordered_map<std::string, Symbol> scalars;  // bare x (session)
+
+// r()/e() and levelsof lists: always RUNTIME, populated by terminal commands
 std::unordered_map<std::string, std::string> stored_results; // "r(max)" -> "(SELECT ...)"
 std::unordered_map<std::string, std::string> runtime_lists;  // levelsof local -> "(SELECT DISTINCT ...)"
 
@@ -253,10 +319,16 @@ std::unordered_map<std::string, std::string> runtime_lists;  // levelsof local -
 std::string last_rclass_command;
 ```
 
+`Define(table, name, rhs)` classifies once: scan the expanded `rhs` for any
+runtime symbol (`r()`, `e()`, a `RUNTIME` entry in any table, a `runtime_lists`
+name); if found, store `{RUNTIME, fragment}` with runtime refs replaced by their
+fragments; otherwise store `{LITERAL, foldedText}`. That is where taint
+propagation (§B.0) lives.
+
 Scoping: `locals` live for the duration of a `do`-file (and loop bodies); push a
-frame on `do`/loop entry and pop on exit. `globals`, `scalars`, and
-`stored_results` are session-scoped (cleared by `clear`). All maps are reset by
-`clear`/`ClearAll` alongside the existing fields.
+frame on `do`/loop entry and pop on exit. `globals`, `scalars`, `stored_results`,
+and `runtime_lists` are session-scoped. All are reset by `clear`/`ClearAll`
+alongside the existing fields.
 
 ---
 
@@ -308,6 +380,14 @@ Runtime (M14b):
   step; verify the kept rows.
 - `count if year==2020; gen share = _N / r(N)` — note `count`'s `r(N)`.
 - `scalar hi = r(max)` then `keep if x == hi` → same subquery via the scalar.
+- **Indirection (§B.0):** `summarize employment; scalar min_employment = r(min);
+  keep if employment > min_employment` → `min_employment` resolves to the
+  `(SELECT min(employment) FROM _sN)` subquery even though the use site looks like
+  a plain column comparison.
+- **Transitive taint:** `scalar floor = min_employment - 1` is RUNTIME and nests
+  the inner subquery; `scalar pi = 3.14; keep if x > pi` stays LITERAL.
+- Name resolution: a bare name that is *not* a defined scalar is left as a column
+  reference, not mistaken for a macro.
 - Stale `r()`: `summarize a; count; di r(max)` → error mentioning `count`.
 - `levelsof year, local(yrs); keep if inlist(year, `yrs')` →
   `year IN (SELECT DISTINCT year FROM _sK)`.
