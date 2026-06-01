@@ -388,9 +388,29 @@ Based on commands used in [korenmiklos/ceo-value](https://github.com/korenmiklos
 - Macros and scalars persist across `clear` (Stata behavior: `clear` only clears data)
 - REPL integration: macro commands always trigger parser override; multi-line loop support via newline splitting
 
-**Not implemented:** `_N` at macro expansion time (requires DuckDB query), stored results (`r()`/`e()`), `macval()`, `macro shift`, extended macro functions (`:subinstr`, `:strlen`, `:permname`, etc.), `foreach of varlist`/`foreach of newlist`
+**Not implemented (deferred to M14b/M14c):** `_N` at macro expansion time, stored results (`r()`/`e()`), `levelsof`, `macval()`, `macro shift`, extended macro functions (`:subinstr`, `:strlen`, `:permname`, etc.), `foreach of varlist`/`foreach of newlist`
+
+Full design for runtime values: **`docs/VARIABLE_SUBSTITUTION.md`**
 
 **Test:** 250 new assertions covering all features (1233 total)
+
+### M14b: Runtime stored results (compiled to SQL)
+
+`r()` results from `summarize`/`count` become **frozen subqueries** against the CTE step the command saw. Later `r(...)` references are resolved during expression translation (not the textual pass). Scalars/locals bound to runtime values store the SQL fragment, not a number. `levelsof` produces set-membership rewrites.
+
+- `r()` from `summarize`/`count` → `(SELECT max(x) FROM _sN)` recorded in state
+- `scalar hi = r(max)` → RUNTIME symbol, stores the subquery fragment
+- Taint propagation: `scalar floor = hi - 1` is RUNTIME, composes the fragment
+- `levelsof x, local(L)` → `IN (SELECT DISTINCT x FROM _sN)` for membership tests
+- `r()` volatility: cleared by next r-class command (Stata behavior)
+- `e()` deferred with `regress` (M9)
+
+### M14c: Named result structs via `let` (stretch)
+
+`let result = summarize employment` captures stored results into a named, non-volatile struct. `result.min`/`result.mean` are dotted access. Multiple results coexist. Compile-time field validation.
+
+- Thin re-skin of M14b's recording mechanism
+- `r()` reframed as implicit auto-reassigned `r` struct
 
 ### M15: `save` to tables, `tempfile`, `preserve`/`restore`
 
@@ -738,7 +758,9 @@ Key files:
 | M11 | Expression functions (`cond`, `inrange`, `inlist`, etc.) | Done |
 | M12 | `merge` | Done |
 | M13 | `duplicates drop`, `expand`, `export`/`import delimited` | Done |
-| M14 | Local macros and loops | Done |
+| M14a | Compile-time macros & loops | Done |
+| M14b | Runtime stored results (`r()`→subquery, `levelsof`) | Planned — see `docs/VARIABLE_SUBSTITUTION.md` |
+| M14c | Named result structs via `let` | Planned (stretch) — see `docs/VARIABLE_SUBSTITUTION.md` |
 | M15 | `save` to tables, `tempfile`, `preserve`/`restore` | Done |
 | M16 | `xtset`/`tsset` + `L.`/`F.`/`D.` | Done |
 | M17 | `bysort` prefix, `var[_n-1]` | Done |

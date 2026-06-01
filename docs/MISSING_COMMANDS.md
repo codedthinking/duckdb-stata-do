@@ -29,10 +29,16 @@ These were previously listed as missing but are now complete:
 
 | Gap | Usage | SQL mapping |
 |---|---|---|
-| Local macros (`local x = ...`, `` `x' ``) | Variable substitution | String replacement in parser |
-| `foreach` / `forvalues` loops | Repeated operations | Unroll in parser |
+| Compile-time macros (`local`/`global`/literal `scalar`, `` `x' ``/`$x`) | Variable substitution | Textual substitution in a pre-tokenization pass |
+| `foreach` / `forvalues` loops | Repeated operations | Unroll the body at compile time |
+| Runtime results (`r(max)`, `r(N)`, `levelsof … local()`) | Reuse of computed values | Compiled to **SQL subqueries**, not substituted as literals |
 
-These are programming constructs, not data commands. They require a pre-processing pass before command tokenization.
+These are programming constructs, not data commands. Design lives in
+**`docs/VARIABLE_SUBSTITUTION.md`**: the core split is *compile-time-known* values
+(handled by textual substitution + loop unrolling, works in `dodoc` with no
+database) versus *runtime-dependent* values (`r()`, `levelsof`), which are
+compiled into the generated SQL as subqueries rather than fetched and pasted
+back — preserving lazy evaluation and `dodoc`/extension parity.
 
 ### Nice to have
 
