@@ -122,8 +122,26 @@ static ParserOverrideResult dodo_parser_override(ParserExtensionInfo *info, cons
 		}
 	}
 
+	// Macro/loop commands always need override (they don't conflict with SQL but aren't SQL either)
+	bool has_macro_commands = false;
+	for (auto &s : statements_str) {
+		string lower_s = StringUtil::Lower(s);
+		StringUtil::Trim(lower_s);
+		if (StringUtil::StartsWith(lower_s, "local ") || StringUtil::StartsWith(lower_s, "global ") ||
+		    StringUtil::StartsWith(lower_s, "scalar ") || StringUtil::StartsWith(lower_s, "macro ") ||
+		    StringUtil::StartsWith(lower_s, "foreach ") || StringUtil::StartsWith(lower_s, "forvalues ") ||
+		    StringUtil::StartsWith(lower_s, "tempvar ") || StringUtil::StartsWith(lower_s, "tempname ") ||
+		    StringUtil::StartsWith(lower_s, "display ")) {
+			has_macro_commands = true;
+			break;
+		}
+	}
+
 	bool any_needs_override = has_conflict_commands && (has_dodo_commands || state.HasData());
 	if (!any_needs_override && (state.live_view_enabled || state.core.materialized) && has_dodo_commands) {
+		any_needs_override = true;
+	}
+	if (!any_needs_override && has_macro_commands) {
 		any_needs_override = true;
 	}
 
@@ -134,10 +152,63 @@ static ParserOverrideResult dodo_parser_override(ParserExtensionInfo *info, cons
 	try {
 		vector<unique_ptr<SQLStatement>> all_statements;
 
+		// Flatten all statements into individual lines (handles multi-line
+		// input from do-files, pasted blocks, etc.)
+		vector<string> all_lines;
 		for (auto &s : statements_str) {
-			string trimmed = s;
-			StringUtil::Trim(trimmed);
+			auto lines = StringUtil::Split(s, '\n');
+			for (auto &l : lines) {
+				string tl = l;
+				StringUtil::Trim(tl);
+				if (!tl.empty()) {
+					all_lines.push_back(tl);
+				}
+			}
+		}
+
+		for (idx_t li = 0; li < all_lines.size(); li++) {
+			string trimmed = all_lines[li];
 			if (trimmed.empty()) {
+				continue;
+			}
+
+			// Expand macros before command recognition
+			trimmed = dodo::ExpandMacros(trimmed, state.core);
+			if (trimmed.empty()) {
+				continue;
+			}
+
+			// Handle foreach/forvalues — use original (pre-expansion) text
+			// to avoid corrupting loop variable references in the body
+			string lower_orig = StringUtil::Lower(all_lines[li]);
+			if (StringUtil::StartsWith(lower_orig, "foreach ") ||
+			    StringUtil::StartsWith(lower_orig, "forvalues ")) {
+				// Collect this and remaining lines for ProcessLines
+				std::vector<string> loop_lines;
+				for (idx_t ri = li; ri < all_lines.size(); ri++) {
+					loop_lines.push_back(all_lines[ri]);
+				}
+				idx_t loop_idx = 0;
+				dodo::LineReader loop_reader = [&](string &out) -> bool {
+					if (loop_idx < loop_lines.size()) {
+						out = loop_lines[loop_idx++];
+						return true;
+					}
+					return false;
+				};
+				auto loop_sql = dodo::ProcessLines(loop_reader, state.core, true);
+				for (auto &lsql : loop_sql) {
+					if (lsql.find("SELECT 'OK' AS status") == string::npos) {
+						Parser p;
+						p.ParseQuery(lsql);
+						for (auto &st : p.statements) {
+							all_statements.push_back(std::move(st));
+						}
+					}
+				}
+				// Skip past lines consumed by the loop (up to closing })
+				// ProcessLines consumed lines via the reader; loop_idx tells us how many
+				li += loop_idx - 1; // -1 because the for loop increments li
 				continue;
 			}
 
@@ -174,7 +245,6 @@ static ParserOverrideResult dodo_parser_override(ParserExtensionInfo *info, cons
 
 				for (idx_t si = 0; si < parser.statements.size(); si++) {
 					if (si == parser.statements.size() - 1) {
-						// Inject history and live view before the final statement
 						if (!history_sql.empty()) {
 							Parser hist_parser;
 							hist_parser.ParseQuery(history_sql);
@@ -193,6 +263,7 @@ static ParserOverrideResult dodo_parser_override(ParserExtensionInfo *info, cons
 					all_statements.push_back(std::move(parser.statements[si]));
 				}
 			} else {
+				// Not a dodo command — parse as standard SQL
 				Parser parser;
 				parser.ParseQuery(trimmed);
 				for (auto &stmt : parser.statements) {
@@ -202,7 +273,15 @@ static ParserOverrideResult dodo_parser_override(ParserExtensionInfo *info, cons
 		}
 
 		if (all_statements.empty()) {
-			return ParserOverrideResult();
+			if (has_macro_commands || has_dodo_commands) {
+				Parser ok_parser;
+				ok_parser.ParseQuery("SELECT 'OK' AS status");
+				for (auto &stmt : ok_parser.statements) {
+					all_statements.push_back(std::move(stmt));
+				}
+			} else {
+				return ParserOverrideResult();
+			}
 		}
 		return ParserOverrideResult(std::move(all_statements));
 	} catch (std::exception &ex) {
