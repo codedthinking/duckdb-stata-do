@@ -152,22 +152,22 @@ static ParserOverrideResult dodo_parser_override(ParserExtensionInfo *info, cons
 	try {
 		vector<unique_ptr<SQLStatement>> all_statements;
 
-		// Build a LineReader over the semicolon-split statements for loop support
-		idx_t stmt_idx = 0;
-		dodo::LineReader stmt_reader = [&](string &out) -> bool {
-			while (stmt_idx < statements_str.size()) {
-				out = statements_str[stmt_idx++];
-				StringUtil::Trim(out);
-				if (!out.empty()) {
-					return true;
+		// Flatten all statements into individual lines (handles multi-line
+		// input from do-files, pasted blocks, etc.)
+		vector<string> all_lines;
+		for (auto &s : statements_str) {
+			auto lines = StringUtil::Split(s, '\n');
+			for (auto &l : lines) {
+				string tl = l;
+				StringUtil::Trim(tl);
+				if (!tl.empty()) {
+					all_lines.push_back(tl);
 				}
 			}
-			return false;
-		};
+		}
 
-		for (auto &s : statements_str) {
-			string trimmed = s;
-			StringUtil::Trim(trimmed);
+		for (idx_t li = 0; li < all_lines.size(); li++) {
+			string trimmed = all_lines[li];
 			if (trimmed.empty()) {
 				continue;
 			}
@@ -178,23 +178,15 @@ static ParserOverrideResult dodo_parser_override(ParserExtensionInfo *info, cons
 				continue;
 			}
 
-			// Handle foreach/forvalues in REPL
-			// Check the ORIGINAL (pre-expansion) text for loop commands,
-			// because ExpandMacros would corrupt loop variable references in the body
-			string orig_trimmed = s;
-			StringUtil::Trim(orig_trimmed);
-			string lower_orig = StringUtil::Lower(orig_trimmed);
+			// Handle foreach/forvalues — use original (pre-expansion) text
+			// to avoid corrupting loop variable references in the body
+			string lower_orig = StringUtil::Lower(all_lines[li]);
 			if (StringUtil::StartsWith(lower_orig, "foreach ") ||
 			    StringUtil::StartsWith(lower_orig, "forvalues ")) {
-				// Split the current multi-line statement into individual lines
+				// Collect this and remaining lines for ProcessLines
 				std::vector<string> loop_lines;
-				auto cur_lines = StringUtil::Split(orig_trimmed, '\n');
-				for (auto &cl : cur_lines) {
-					string tl = cl;
-					StringUtil::Trim(tl);
-					if (!tl.empty()) {
-						loop_lines.push_back(tl);
-					}
+				for (idx_t ri = li; ri < all_lines.size(); ri++) {
+					loop_lines.push_back(all_lines[ri]);
 				}
 				idx_t loop_idx = 0;
 				dodo::LineReader loop_reader = [&](string &out) -> bool {
@@ -204,7 +196,7 @@ static ParserOverrideResult dodo_parser_override(ParserExtensionInfo *info, cons
 					}
 					return false;
 				};
-				auto loop_sql = dodo::ProcessLines(loop_reader, state.core, false);
+				auto loop_sql = dodo::ProcessLines(loop_reader, state.core, true);
 				for (auto &lsql : loop_sql) {
 					if (lsql.find("SELECT 'OK' AS status") == string::npos) {
 						Parser p;
@@ -214,7 +206,10 @@ static ParserOverrideResult dodo_parser_override(ParserExtensionInfo *info, cons
 						}
 					}
 				}
-				continue; // Let the for loop process remaining statements
+				// Skip past lines consumed by the loop (up to closing })
+				// ProcessLines consumed lines via the reader; loop_idx tells us how many
+				li += loop_idx - 1; // -1 because the for loop increments li
+				continue;
 			}
 
 			std::string cmd_name;
@@ -250,7 +245,6 @@ static ParserOverrideResult dodo_parser_override(ParserExtensionInfo *info, cons
 
 				for (idx_t si = 0; si < parser.statements.size(); si++) {
 					if (si == parser.statements.size() - 1) {
-						// Inject history and live view before the final statement
 						if (!history_sql.empty()) {
 							Parser hist_parser;
 							hist_parser.ParseQuery(history_sql);
@@ -269,6 +263,7 @@ static ParserOverrideResult dodo_parser_override(ParserExtensionInfo *info, cons
 					all_statements.push_back(std::move(parser.statements[si]));
 				}
 			} else {
+				// Not a dodo command — parse as standard SQL
 				Parser parser;
 				parser.ParseQuery(trimmed);
 				for (auto &stmt : parser.statements) {
@@ -278,7 +273,6 @@ static ParserOverrideResult dodo_parser_override(ParserExtensionInfo *info, cons
 		}
 
 		if (all_statements.empty()) {
-			// If only macro/loop commands were processed, return a dummy OK
 			if (has_macro_commands || has_dodo_commands) {
 				Parser ok_parser;
 				ok_parser.ParseQuery("SELECT 'OK' AS status");
