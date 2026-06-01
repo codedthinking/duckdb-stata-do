@@ -349,15 +349,48 @@ Based on commands used in [korenmiklos/ceo-value](https://github.com/korenmiklos
 - `import delimited "file", clear` → same as `use "file.csv", clear`
 - **Test:** duplicates drop from edgelist.do, expand from ceo-panel.do
 
-### M14: Local macros and loops
-- `local name value` → store in `DodoStateInfo.local_macros[name] = value`
-- `` `name' `` substitution → replace before command processing
-- `local name = expression` → evaluate expression (limited: numeric constants, `_N`)
-- `foreach var of local macroname { ... }` → unroll loop body for each value
-- `forvalues i = 1/N { ... }` → unroll loop body for each integer
-- Macro substitution in all commands: `` keep `dimensions' `` → `keep var1 var2 ...`
-- This is the most complex feature — requires a pre-processing pass before tokenization
-- **Test:** local macros from balance.do, foreach from balance.do
+### M14: Local/global macros, scalars, and loops
+
+**Macros:**
+- `local name value` / `local name = expr` / `local name "string"` → store in `DodoState.local_macros`
+- `global name value` / `global name = expr` → store in `DodoState.global_macros`
+- `` `name' `` expansion (locals), `$name` / `${name}` expansion (globals) — via `ExpandMacros()` pre-processing pass before command recognition
+- `local ++name` / `local --name` — increment/decrement numeric macros
+- `macro drop name [name ...] | _all`
+- Nested backtick-quote expansion with depth tracking (e.g., `` `:word count `sentence'' ``)
+
+**Scalars:**
+- `scalar [define] name = expr` → stores in both `state.scalars` and `state.local_macros`
+- Bare scalar names expanded in expressions via `ExpandMacros()` (e.g., `keep if year > threshold`)
+- `scalar list` / `scalar drop names | _all`
+- Simple expression evaluator (`EvaluateSimpleExpr`) for `+`, `-`, `*`, `/`, parens, `int()`, `round()`, `sqrt()`, `ln()`, `exp()`, `abs()`, `ceil()`, `floor()`
+
+**Loops:**
+- `foreach lname in list { body }` — arbitrary word list
+- `foreach lname of local macname { body }` — expand local macro as list
+- `foreach lname of global macname { body }` — expand global macro as list
+- `foreach lname of numlist spec { body }` — numeric list via `ParseNumlist()` (`1/5`, `1(2)10`, etc.)
+- `forvalues lname = range { body }` — `#(#)#` and `#/#` range syntax
+- Multi-line brace blocks accumulated via `AccumulateBraceBlock()`
+- Single-line loop syntax: `foreach x in a b c { generate y = x }`
+- Nested loops supported
+
+**Other:**
+- `tempvar lclname [...]` — generate unique column names (`__dodo_tmp_N`)
+- `tempname lclname [...]` — generate unique scalar/macro names
+- `display "text"` / `display expr` — informational output
+- Macro functions: `:variable label varname`, `:value label varname`, `:label labelname #`, `:word count string`, `:word # of string`
+- `` `=expr' `` inline expression evaluation
+
+**Architecture:**
+- `ExpandMacros()` runs before `IsDodoCommand()` in all processing paths (file, CLI, REPL)
+- `ProcessDoFile()` and `process_stream()` refactored into shared `ProcessLines()` with `LineReader` abstraction
+- Macros and scalars persist across `clear` (Stata behavior: `clear` only clears data)
+- REPL integration: macro commands always trigger parser override; multi-line loop support via newline splitting
+
+**Not implemented:** `_N` at macro expansion time (requires DuckDB query), stored results (`r()`/`e()`), `macval()`, `macro shift`, extended macro functions (`:subinstr`, `:strlen`, `:permname`, etc.), `foreach of varlist`/`foreach of newlist`
+
+**Test:** 250 new assertions covering all features (1233 total)
 
 ### M15: `save` to tables, `tempfile`, `preserve`/`restore`
 
@@ -681,7 +714,7 @@ Key files:
 - `src/dta/read_dta_function.hpp/cpp` — DuckDB `read_dta()` table function
 - `src/dta/write_dta_function.hpp/cpp` — DuckDB `COPY TO (FORMAT dta)` CopyFunction
 - `src/cli/dodoc.cpp` — CLI compiler entry point
-- `test/sql/dodo.test` — sqllogictest suite (920+ assertions)
+- `test/sql/dodo.test` — sqllogictest suite (1233 assertions)
 - `test/sql/read_dta.test` — read_dta tests
 - `test/sql/write_dta.test` — write_dta + round-trip tests
 
@@ -705,12 +738,12 @@ Key files:
 | M11 | Expression functions (`cond`, `inrange`, `inlist`, etc.) | Done |
 | M12 | `merge` | Done |
 | M13 | `duplicates drop`, `expand`, `export`/`import delimited` | Done |
-| M14 | Local macros and loops | **Not started** |
+| M14 | Local macros and loops | Done |
 | M15 | `save` to tables, `tempfile`, `preserve`/`restore` | Done |
 | M16 | `xtset`/`tsset` + `L.`/`F.`/`D.` | Done |
 | M17 | `bysort` prefix, `var[_n-1]` | Done |
 | M18 | `undo`/`redo`, `history` | Done |
-| M19 | Polish phase 2 | Partial |
+| M19 | Polish phase 2 | Partial (`display` done, `compress` pending) |
 
 ### Added in v0.2.0 (not in original plan)
 
@@ -729,7 +762,7 @@ See `docs/DBT_RESEARCH.md` for research on bipartite DAG execution, build system
 ## Verification
 
 1. `make` — builds successfully
-2. `./build/release/test/unittest --test-dir . "test/sql/dodo.test"` — 920+ assertions pass
+2. `./build/release/test/unittest --test-dir . "test/sql/dodo.test"` — 1233 assertions pass
 3. `echo 'use "data.csv", clear' | ./build/release/extension/dodo/dodoc` — compiler works
 4. Manual test:
    ```sql
