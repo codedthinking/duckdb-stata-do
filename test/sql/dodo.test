@@ -1453,3 +1453,436 @@ history
 
 statement ok
 clear
+
+# ============================================================
+# M14: Local/global macros, scalars, and loops
+# ============================================================
+
+# --- local macros ---
+
+statement ok
+local x 5
+
+statement ok
+local y hello world
+
+statement ok
+use "test/data/firms.csv", clear
+
+# Local macro expansion in keep
+statement ok
+local vars id name
+
+statement ok
+keep `vars' revenue year
+
+query IIRI
+list
+----
+1	Acme	1000	2017
+2	Beta	2000	2018
+3	Gamma	1500	2017
+4	Delta	3000	2018
+5	Epsilon	500	2018
+
+# local with = evaluates expression
+statement ok
+clear
+
+statement ok
+local a = 300
+
+statement ok
+local b = `a' * 5
+
+statement ok
+use "test/data/firms.csv", clear
+
+query I
+count if revenue > `b'
+----
+2
+
+# local ++/--
+statement ok
+clear
+
+statement ok
+local counter = 0
+
+statement ok
+local ++counter
+
+statement ok
+local ++counter
+
+statement ok
+use "test/data/firms.csv", clear
+
+query I
+count if id <= `counter'
+----
+2
+
+# local with quoted string
+statement ok
+clear
+
+statement ok
+local greeting "hello world"
+
+query I
+display "`greeting'"
+----
+hello world
+
+# --- global macros ---
+
+statement ok
+global threshold 2000
+
+statement ok
+use "test/data/firms.csv", clear
+
+query I
+count if revenue >= $threshold
+----
+2
+
+# ${name} syntax
+statement ok
+clear
+
+statement ok
+global maxrev 3000
+
+statement ok
+use "test/data/firms.csv", clear
+
+query I
+count if revenue <= ${maxrev}
+----
+5
+
+# --- macro drop ---
+
+statement ok
+local dropme something
+
+statement ok
+macro drop dropme
+
+# expanding dropped macro gives empty string
+statement ok
+use "test/data/firms.csv", clear
+
+query I
+count
+----
+5
+
+# --- scalar ---
+
+statement ok
+clear
+
+statement ok
+scalar pi = 3.14159
+
+statement ok
+scalar r = 2
+
+statement ok
+scalar area = pi * r * r
+
+statement ok
+use "test/data/firms.csv", clear
+
+# scalar values expand as locals in expressions
+statement ok
+generate big = revenue > area
+
+query IIRII
+list
+----
+1	Acme	1000	2017	1
+2	Beta	2000	2018	1
+3	Gamma	1500	2017	1
+4	Delta	3000	2018	1
+5	Epsilon	500	2018	1
+
+# scalar list
+statement ok
+clear
+
+statement ok
+scalar drop _all
+
+statement ok
+scalar myval = 42
+
+query IT
+scalar list
+----
+myval	42
+
+# --- display ---
+
+query I
+display "Hello from dodo"
+----
+Hello from dodo
+
+# --- tempvar ---
+
+statement ok
+use "test/data/firms.csv", clear
+
+statement ok
+tempvar tmp
+
+statement ok
+generate `tmp' = revenue * 2
+
+# The temp variable exists (we can use it)
+query I
+count if `tmp' > 3000
+----
+2
+
+# --- tempname ---
+
+statement ok
+clear
+
+statement ok
+tempname s1
+
+statement ok
+scalar `s1' = 1500
+
+# Can access via the tempname — scalar value expands as a local
+statement ok
+use "test/data/firms.csv", clear
+
+query I
+count if revenue > `s1'
+----
+2
+
+# --- foreach in ---
+
+statement ok
+clear
+
+statement ok
+use "test/data/firms.csv", clear
+
+statement ok
+foreach v in revenue id {
+    generate `v'_sq = `v' * `v'
+}
+
+# Check that both _sq columns were created
+query IIRIII
+list
+----
+1	Acme	1000	2017	1000000	1
+2	Beta	2000	2018	4000000	4
+3	Gamma	1500	2017	2250000	9
+4	Delta	3000	2018	9000000	16
+5	Epsilon	500	2018	250000	25
+
+# --- foreach of local ---
+
+statement ok
+clear
+
+statement ok
+local mylist revenue id
+
+statement ok
+use "test/data/firms.csv", clear
+
+statement ok
+foreach v of local mylist {
+    generate `v'_double = `v' * 2
+}
+
+query I
+count
+----
+5
+
+# --- foreach of numlist ---
+
+statement ok
+clear
+
+statement ok
+use "test/data/firms.csv", clear
+
+statement ok
+foreach n of numlist 1/3 {
+    generate var`n' = `n'
+}
+
+query IIIIIII
+list
+----
+1	Acme	1000	2017	1	2	3
+2	Beta	2000	2018	1	2	3
+3	Gamma	1500	2017	1	2	3
+4	Delta	3000	2018	1	2	3
+5	Epsilon	500	2018	1	2	3
+
+# --- forvalues ---
+
+statement ok
+clear
+
+statement ok
+use "test/data/firms.csv", clear
+
+statement ok
+forvalues i = 1(2)5 {
+    generate x`i' = `i'
+}
+
+# Creates x1, x3, x5
+query IIIIIII
+list
+----
+1	Acme	1000	2017	1	3	5
+2	Beta	2000	2018	1	3	5
+3	Gamma	1500	2017	1	3	5
+4	Delta	3000	2018	1	3	5
+5	Epsilon	500	2018	1	3	5
+
+# --- macro functions ---
+
+statement ok
+clear
+
+statement ok
+use "test/data/firms.csv", clear
+
+statement ok
+label variable revenue "Annual Revenue (USD)"
+
+# :variable label
+statement ok
+local revlab `:variable label revenue'
+
+query I
+display "`revlab'"
+----
+Annual Revenue (USD)
+
+# :word count
+statement ok
+local sentence one two three four
+
+statement ok
+local n `:word count `sentence''
+
+query I
+display "`n'"
+----
+4
+
+# :word # of
+statement ok
+local w2 `:word 2 of `sentence''
+
+query I
+display "`w2'"
+----
+two
+
+# --- value labels with macro function ---
+
+statement ok
+clear
+
+statement ok
+label define yesno 0 "No" 1 "Yes"
+
+statement ok
+local lbl `:label yesno 1'
+
+query I
+display "`lbl'"
+----
+Yes
+
+# --- nested macros ---
+
+statement ok
+clear
+
+statement ok
+local prefix rev
+
+statement ok
+local suffix enue
+
+statement ok
+use "test/data/firms.csv", clear
+
+statement ok
+keep `prefix'`suffix' year
+
+query IR
+list
+----
+1000	2017
+2000	2018
+1500	2017
+3000	2018
+500	2018
+
+# --- `=expr' inline expression ---
+
+statement ok
+clear
+
+statement ok
+use "test/data/firms.csv", clear
+
+query I
+count if revenue > `=1000 + 500'
+----
+2
+
+# --- forvalues with / shorthand ---
+
+statement ok
+clear
+
+statement ok
+use "test/data/firms.csv", clear
+
+statement ok
+local total = 0
+
+statement ok
+forvalues i = 1/3 {
+    local total = `total' + `i'
+}
+
+query I
+display "`total'"
+----
+6
+
+# --- cleanup ---
+
+statement ok
+clear
+
+statement ok
+scalar drop _all
+
+statement ok
+macro drop _all

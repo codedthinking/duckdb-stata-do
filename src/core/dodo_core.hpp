@@ -2,6 +2,7 @@
 
 #include "string_utils.hpp"
 
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -45,6 +46,18 @@ struct DodoState {
 	std::unordered_map<std::string, std::unordered_map<int, std::string>> value_label_defs;
 	//! Column-to-value-label mapping: column_name -> label_name
 	std::unordered_map<std::string, std::string> column_labels;
+
+	//! Stata macros (text substitution)
+	std::unordered_map<std::string, std::string> local_macros;
+	std::unordered_map<std::string, std::string> global_macros;
+
+	//! Stata scalars (evaluated numeric/string values)
+	std::unordered_map<std::string, std::string> scalars;
+
+	//! Tempvar/tempname tracking
+	std::vector<std::string> tempvar_columns;  //! columns to exclude at scope end
+	std::vector<std::string> tempname_names;   //! scalar/macro names to drop at scope end
+	int temp_counter = 0;                      //! unique name generator
 
 	//! Tempfile names (registered via tempfile command)
 	std::unordered_set<std::string> tempfile_names;
@@ -115,10 +128,21 @@ struct DodoState {
 		variable_labels.clear();
 		value_label_defs.clear();
 		column_labels.clear();
+		// Macros, scalars, and tempnames persist across clear (Stata behavior)
+		tempvar_columns.clear();
 		tempfile_names.clear();
 		preserve_checkpoint = -1;
 		preserve_step_counter = -1;
 		materialized = false;
+	}
+
+	//! Full reset: also clears macros, scalars, and tempnames
+	void ClearMacros() {
+		local_macros.clear();
+		global_macros.clear();
+		scalars.clear();
+		tempname_names.clear();
+		temp_counter = 0;
 	}
 
 	void ClearAll() {
@@ -151,6 +175,24 @@ DodoCommand TokenizeCommand(const std::string &query);
 std::string TranslateExpression(const std::string &expr, const std::string &by_cols = "",
                                 const std::string &panel_var = "", const std::string &time_var = "",
                                 const std::string &bysort_order = "");
+
+//! Expand Stata macros in text: `name' for locals, $name/${name} for globals, scalar(name)
+std::string ExpandMacros(const std::string &text, const DodoState &state);
+
+//! Evaluate a simple numeric expression (for local x = expr, scalar x = expr)
+double EvaluateSimpleExpr(const std::string &expr);
+
+//! Evaluate a macro function (e.g., :variable label varname, :word count string)
+std::string EvaluateMacroFunction(const std::string &func, const DodoState &state);
+
+//! Parse a Stata numlist specification (e.g., "1/5", "1(2)10")
+std::vector<std::string> ParseNumlist(const std::string &spec);
+
+//! Line reader callback: returns true and fills line, or false at EOF
+using LineReader = std::function<bool(std::string &line)>;
+
+//! Process lines from a source, returning side-effect SQL statements
+std::vector<std::string> ProcessLines(LineReader reader, DodoState &state, bool skip_terminal);
 
 //! Process a single parsed command, returning SQL (or empty string)
 std::string ProcessCommand(const DodoCommand &cmd, DodoState &state);

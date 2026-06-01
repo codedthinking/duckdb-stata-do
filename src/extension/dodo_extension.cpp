@@ -122,8 +122,26 @@ static ParserOverrideResult dodo_parser_override(ParserExtensionInfo *info, cons
 		}
 	}
 
+	// Macro/loop commands always need override (they don't conflict with SQL but aren't SQL either)
+	bool has_macro_commands = false;
+	for (auto &s : statements_str) {
+		string lower_s = StringUtil::Lower(s);
+		StringUtil::Trim(lower_s);
+		if (StringUtil::StartsWith(lower_s, "local ") || StringUtil::StartsWith(lower_s, "global ") ||
+		    StringUtil::StartsWith(lower_s, "scalar ") || StringUtil::StartsWith(lower_s, "macro ") ||
+		    StringUtil::StartsWith(lower_s, "foreach ") || StringUtil::StartsWith(lower_s, "forvalues ") ||
+		    StringUtil::StartsWith(lower_s, "tempvar ") || StringUtil::StartsWith(lower_s, "tempname ") ||
+		    StringUtil::StartsWith(lower_s, "display ")) {
+			has_macro_commands = true;
+			break;
+		}
+	}
+
 	bool any_needs_override = has_conflict_commands && (has_dodo_commands || state.HasData());
 	if (!any_needs_override && (state.live_view_enabled || state.core.materialized) && has_dodo_commands) {
+		any_needs_override = true;
+	}
+	if (!any_needs_override && has_macro_commands) {
 		any_needs_override = true;
 	}
 
@@ -134,11 +152,69 @@ static ParserOverrideResult dodo_parser_override(ParserExtensionInfo *info, cons
 	try {
 		vector<unique_ptr<SQLStatement>> all_statements;
 
+		// Build a LineReader over the semicolon-split statements for loop support
+		idx_t stmt_idx = 0;
+		dodo::LineReader stmt_reader = [&](string &out) -> bool {
+			while (stmt_idx < statements_str.size()) {
+				out = statements_str[stmt_idx++];
+				StringUtil::Trim(out);
+				if (!out.empty()) {
+					return true;
+				}
+			}
+			return false;
+		};
+
 		for (auto &s : statements_str) {
 			string trimmed = s;
 			StringUtil::Trim(trimmed);
 			if (trimmed.empty()) {
 				continue;
+			}
+
+			// Expand macros before command recognition
+			trimmed = dodo::ExpandMacros(trimmed, state.core);
+			if (trimmed.empty()) {
+				continue;
+			}
+
+			// Handle foreach/forvalues in REPL
+			// Check the ORIGINAL (pre-expansion) text for loop commands,
+			// because ExpandMacros would corrupt loop variable references in the body
+			string orig_trimmed = s;
+			StringUtil::Trim(orig_trimmed);
+			string lower_orig = StringUtil::Lower(orig_trimmed);
+			if (StringUtil::StartsWith(lower_orig, "foreach ") ||
+			    StringUtil::StartsWith(lower_orig, "forvalues ")) {
+				// Split the current multi-line statement into individual lines
+				std::vector<string> loop_lines;
+				auto cur_lines = StringUtil::Split(orig_trimmed, '\n');
+				for (auto &cl : cur_lines) {
+					string tl = cl;
+					StringUtil::Trim(tl);
+					if (!tl.empty()) {
+						loop_lines.push_back(tl);
+					}
+				}
+				idx_t loop_idx = 0;
+				dodo::LineReader loop_reader = [&](string &out) -> bool {
+					if (loop_idx < loop_lines.size()) {
+						out = loop_lines[loop_idx++];
+						return true;
+					}
+					return false;
+				};
+				auto loop_sql = dodo::ProcessLines(loop_reader, state.core, false);
+				for (auto &lsql : loop_sql) {
+					if (lsql.find("SELECT 'OK' AS status") == string::npos) {
+						Parser p;
+						p.ParseQuery(lsql);
+						for (auto &st : p.statements) {
+							all_statements.push_back(std::move(st));
+						}
+					}
+				}
+				continue; // Let the for loop process remaining statements
 			}
 
 			std::string cmd_name;
@@ -202,7 +278,16 @@ static ParserOverrideResult dodo_parser_override(ParserExtensionInfo *info, cons
 		}
 
 		if (all_statements.empty()) {
-			return ParserOverrideResult();
+			// If only macro/loop commands were processed, return a dummy OK
+			if (has_macro_commands || has_dodo_commands) {
+				Parser ok_parser;
+				ok_parser.ParseQuery("SELECT 'OK' AS status");
+				for (auto &stmt : ok_parser.statements) {
+					all_statements.push_back(std::move(stmt));
+				}
+			} else {
+				return ParserOverrideResult();
+			}
 		}
 		return ParserOverrideResult(std::move(all_statements));
 	} catch (std::exception &ex) {

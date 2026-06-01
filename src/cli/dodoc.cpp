@@ -62,124 +62,15 @@ static CliOptions parse_args(int argc, char *argv[]) {
 	return opts;
 }
 
-// Process lines from an input stream (file or stdin)
+// Process lines from an input stream using shared ProcessLines engine
 static void process_stream(std::istream &input, dodo::DodoState &state, std::vector<std::string> &side_effect_sql,
                            const CliOptions &opts) {
-	std::string line;
-	bool in_block_comment = false;
-	std::string continued_line;
-
-	while (std::getline(input, line)) {
-		std::string trimmed = line;
-		dodo::str::Trim(trimmed);
-
-		// Handle block comments /* ... */
-		if (in_block_comment) {
-			auto end_pos = trimmed.find("*/");
-			if (end_pos != std::string::npos) {
-				in_block_comment = false;
-				trimmed = trimmed.substr(end_pos + 2);
-				dodo::str::Trim(trimmed);
-			} else {
-				continue;
-			}
-		}
-
-		auto block_start = trimmed.find("/*");
-		if (block_start != std::string::npos) {
-			auto block_end = trimmed.find("*/", block_start + 2);
-			if (block_end != std::string::npos) {
-				trimmed = trimmed.substr(0, block_start) + trimmed.substr(block_end + 2);
-				dodo::str::Trim(trimmed);
-			} else {
-				trimmed = trimmed.substr(0, block_start);
-				dodo::str::Trim(trimmed);
-				in_block_comment = true;
-			}
-		}
-
-		// Strip // line comments
-		auto comment_pos = trimmed.find("//");
-		if (comment_pos != std::string::npos) {
-			if (comment_pos + 2 < trimmed.size() && trimmed[comment_pos + 2] == '/') {
-				// Line continuation ///
-				auto before = trimmed.substr(0, comment_pos);
-				dodo::str::Trim(before);
-				continued_line += before + " ";
-				continue;
-			}
-			trimmed = trimmed.substr(0, comment_pos);
-			dodo::str::Trim(trimmed);
-		}
-
-		// Strip * line-start comments
-		if (!trimmed.empty() && trimmed[0] == '*') {
-			continue;
-		}
-
-		// Handle line continuation
-		if (!continued_line.empty()) {
-			trimmed = continued_line + trimmed;
-			continued_line.clear();
-		}
-
-		if (trimmed.empty()) {
-			continue;
-		}
-
-		// Strip trailing semicolons
-		if (!trimmed.empty() && trimmed.back() == ';') {
-			trimmed.pop_back();
-			dodo::str::Trim(trimmed);
-		}
-		if (trimmed.empty()) {
-			continue;
-		}
-
-		std::string sub_command;
-		if (!dodo::IsDodoCommand(trimmed, sub_command)) {
-			continue;
-		}
-
-		// Skip terminal commands unless --terminal is set
-		if (!dodo::IsTransformationCommand(sub_command) && !dodo::IsSideEffectCommand(sub_command)) {
-			if (!opts.terminal) {
-				continue;
-			}
-		}
-
-		auto sub_cmd = dodo::TokenizeCommand(trimmed);
-		state.pending_command = trimmed;
-		std::string sql = dodo::ProcessCommand(sub_cmd, state);
-
-		// Force lazy mode for use/import (no CREATE TABLE in CLI context)
-		if ((sub_command == "use" || sub_command == "import") && state.materialized) {
-			std::string source = dodo::ExtractQuotedString(sub_cmd.arguments);
-			std::string read_expr = dodo::FileReadFunction(source);
-			if (sub_command == "import") {
-				auto rest = sub_cmd.arguments.substr(10);
-				dodo::str::Trim(rest);
-				read_expr = "read_csv('" + dodo::ExtractQuotedString(rest) + "')";
-			}
-			state.cte_steps.clear();
-			state.cte_commands.clear();
-			state.step_counter = 0;
-			state.AddStep("SELECT * FROM " + read_expr);
-			state.materialized = false;
-		}
-
-		// Collect side-effect SQL (save, export)
-		if (dodo::IsSideEffectCommand(sub_command)) {
-			side_effect_sql.push_back(sql);
-		}
-
-		// Terminal commands: emit their SQL directly
-		if (opts.terminal && !dodo::IsTransformationCommand(sub_command) && !dodo::IsSideEffectCommand(sub_command)) {
-			// Skip "SELECT 'OK' AS status" acknowledgments
-			if (sql.find("SELECT 'OK' AS status") == std::string::npos) {
-				side_effect_sql.push_back(sql);
-			}
-		}
+	dodo::LineReader reader = [&](std::string &out) -> bool {
+		return !!std::getline(input, out);
+	};
+	auto results = dodo::ProcessLines(reader, state, /*skip_terminal=*/!opts.terminal);
+	for (auto &sql : results) {
+		side_effect_sql.push_back(sql);
 	}
 }
 
