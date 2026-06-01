@@ -349,15 +349,41 @@ Based on commands used in [korenmiklos/ceo-value](https://github.com/korenmiklos
 - `import delimited "file", clear` → same as `use "file.csv", clear`
 - **Test:** duplicates drop from edgelist.do, expand from ceo-panel.do
 
-### M14: Local macros and loops
-- `local name value` → store in `DodoStateInfo.local_macros[name] = value`
-- `` `name' `` substitution → replace before command processing
-- `local name = expression` → evaluate expression (limited: numeric constants, `_N`)
-- `foreach var of local macroname { ... }` → unroll loop body for each value
-- `forvalues i = 1/N { ... }` → unroll loop body for each integer
-- Macro substitution in all commands: `` keep `dimensions' `` → `keep var1 var2 ...`
-- This is the most complex feature — requires a pre-processing pass before tokenization
-- **Test:** local macros from balance.do, foreach from balance.do
+### M14: Variable substitution — macros, scalars, stored results
+
+Full design: **`docs/VARIABLE_SUBSTITUTION.md`**.
+
+**Key principle (because dodo compiles, not interprets):** every Stata "variable"
+is either *compile-time-known* or *runtime-dependent*, and the two use different
+machinery. Compile-time values are handled by **textual substitution + loop
+unrolling**; runtime values are **compiled into the SQL as subqueries**, never
+fetched and pasted back. This keeps `dodoc` (no DuckDB) and the extension on one
+semantics and preserves lazy evaluation.
+
+#### M14a — Compile-time macros & loops (textual)
+- `local name value` → `DodoState.locals[name] = value`
+- `global name value` → `DodoState.globals[name] = value`
+- `scalar name = const` → literal in `DodoState.scalars` (runtime RHS → M14b)
+- `` `name' ``, `$name`/`${name}`, `` `=const' `` substitution — preprocessing pass
+  before tokenization, innermost-first, recursive with depth guard
+- `forvalues i = a(step)b { ... }` and
+  `foreach v of varlist|local|global|numlist … { ... }` / `foreach v in … { ... }`
+  → unroll the `{ … }` body once per (compile-time-known) iteration
+- Fully testable in `dodoc` with no data
+- **Test:** local varlists and `foreach`/`forvalues` from balance.do
+
+#### M14b — Runtime stored results (compiled to SQL)
+- `r()` from `summarize`/`count` → record each `r(...)` as a **frozen subquery**
+  against the CTE step the command saw (e.g. `r(max) ↦ (SELECT max(x) FROM _sN)`)
+- Later `r(...)` references resolved during expression translation, not the
+  textual pass; volatility = cleared by the next r-class command
+- Scalars/locals bound to a runtime value store the SQL fragment, not a number
+- `levelsof x, local(L)` → set-membership rewrites
+  (`… IN (SELECT DISTINCT x FROM _sN)`); loops over a runtime list that require
+  iterating an unknown number of times raise an explicit error
+- `e()` deferred with `regress` (M9)
+- **Test:** `summarize revenue; keep if revenue == r(max)`; `levelsof` + `inlist`;
+  determinism (same `.do` ⇒ same SQL regardless of data)
 
 ### M15: `save` to tables, `tempfile`, `preserve`/`restore`
 
@@ -705,7 +731,8 @@ Key files:
 | M11 | Expression functions (`cond`, `inrange`, `inlist`, etc.) | Done |
 | M12 | `merge` | Done |
 | M13 | `duplicates drop`, `expand`, `export`/`import delimited` | Done |
-| M14 | Local macros and loops | **Not started** |
+| M14a | Compile-time macros & loops (`local`/`global`/`scalar`, `foreach`/`forvalues`) | **Planned** — see `docs/VARIABLE_SUBSTITUTION.md` |
+| M14b | Runtime stored results (`r()`→subquery, `levelsof`) | **Planned** — see `docs/VARIABLE_SUBSTITUTION.md` |
 | M15 | `save` to tables, `tempfile`, `preserve`/`restore` | Done |
 | M16 | `xtset`/`tsset` + `L.`/`F.`/`D.` | Done |
 | M17 | `bysort` prefix, `var[_n-1]` | Done |
