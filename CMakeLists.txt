@@ -12,15 +12,13 @@ set(CMAKE_CXX_STANDARD "17" CACHE STRING "C++ standard to enforce")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src/extension ${CMAKE_CURRENT_SOURCE_DIR}/src/core
-                    ${CMAKE_CURRENT_SOURCE_DIR}/src/dta)
+                    ${CMAKE_CURRENT_SOURCE_DIR}/duckdb-dta/src/include
+                    ${CMAKE_CURRENT_SOURCE_DIR}/duckdb-dta/src)
 
 set(EXTENSION_SOURCES
     src/extension/dodo_extension.cpp
     src/core/dodo_core.cpp
-    src/dta/dta_reader.cpp
-    src/dta/read_dta_function.cpp
-    src/dta/dta_writer.cpp
-    src/dta/write_dta_function.cpp)
+    duckdb-dta/src/dta_reader.cpp)
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
@@ -32,6 +30,7 @@ install(
   ARCHIVE DESTINATION "${INSTALL_LIB_DIR}")
 
 # CLI tool (standalone, no DuckDB dependency)
-add_executable(dodoc src/cli/dodoc.cpp src/core/dodo_core.cpp src/dta/dta_reader.cpp)
-target_include_directories(dodoc PRIVATE src/core src/dta)
+add_executable(dodoc src/cli/dodoc.cpp src/core/dodo_core.cpp
+               duckdb-dta/src/dta_reader.cpp)
+target_include_directories(dodoc PRIVATE src/core duckdb-dta/src/include)
 target_compile_features(dodoc PRIVATE cxx_std_17)

@@ -9,3 +9,6 @@
 [submodule "duckdb-ui"]
 	path = duckdb-ui
 	url = https://github.com/duckdb/duckdb-ui.git
+[submodule "duckdb-dta"]
+	path = duckdb-dta
+	url = https://github.com/codedthinking/duckdb-dta

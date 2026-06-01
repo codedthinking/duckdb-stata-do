@@ -1,0 +1,96 @@
+# name: test/sql/dodo_dta.test
+# description: test dodo commands with .dta files
+# group: [sql]
+
+require dodo
+
+require dta
+
+# ============================================================
+# Variable labels read from .dta
+# ============================================================
+
+# auto.dta has variable labels set by the Python generator
+statement ok
+use "test/data/auto.dta", clear
+
+# Verify labels were read
+query IIII
+codebook
+----
+id	INTEGER	Firm identifier	(empty)
+name	VARCHAR	Firm name	(empty)
+revenue	DOUBLE	Annual revenue	(empty)
+year	SMALLINT	Fiscal year	(empty)
+
+# label variable overrides
+statement ok
+label variable id "Unique firm ID"
+
+query IIII
+codebook
+----
+id	INTEGER	Unique firm ID	(empty)
+name	VARCHAR	Firm name	(empty)
+revenue	DOUBLE	Annual revenue	(empty)
+year	SMALLINT	Fiscal year	(empty)
+
+statement ok
+clear
+
+# ============================================================
+# save command with .dta extension
+# ============================================================
+
+statement ok
+use "test/data/auto.dta", clear
+
+statement ok
+keep if year == 2018
+
+statement ok
+save "__TEST_DIR__/save_test.dta"
+
+statement ok
+clear
+
+query I
+SELECT count(*) FROM read_dta('__TEST_DIR__/save_test.dta')
+----
+2
+
+query IIR
+SELECT id, name, revenue FROM read_dta('__TEST_DIR__/save_test.dta') ORDER BY id
+----
+2	Beta Corp	2500.5
+3	Gamma	NULL
+
+# ============================================================
+# use .dta then transform
+# ============================================================
+
+statement ok
+use "test/data/auto.dta", clear
+
+query I
+count
+----
+3
+
+query IIRI
+list
+----
+1	Acme	1000.0	2017
+2	Beta Corp	2500.5	2018
+3	Gamma	NULL	2018
+
+statement ok
+keep if year == 2018
+
+query I
+count
+----
+2
+
+statement ok
+clear
