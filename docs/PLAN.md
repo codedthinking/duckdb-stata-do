@@ -385,6 +385,16 @@ semantics and preserves lazy evaluation.
 - **Test:** `summarize revenue; keep if revenue == r(max)`; `levelsof` + `inlist`;
   determinism (same `.do` ⇒ same SQL regardless of data)
 
+#### M14c — Named result structs via `let` (stretch)
+- `let result = summarize employment` captures stored results into a named,
+  **non-volatile** struct; `result.min`/`result.mean`/… are dotted runtime symbols
+- New keyword `let` (keeps dodo's "every command starts with a keyword" invariant);
+  field access reuses the §B.0 symbol table and B.1 recording
+- `r(min)` reframed as the implicit, auto-reassigned `r` struct → `r.min`
+- Lets multiple results coexist (`emp.min` and `rev.mean` simultaneously), which
+  `r()` cannot; validates field names at compile time
+- **Test:** two `let` captures used in one `keep`; unknown field → compile error
+
 ### M15: `save` to tables, `tempfile`, `preserve`/`restore`
 
 **Enhanced `save` — explicit `table` option for in-memory tables:**
@@ -733,6 +743,7 @@ Key files:
 | M13 | `duplicates drop`, `expand`, `export`/`import delimited` | Done |
 | M14a | Compile-time macros & loops (`local`/`global`/`scalar`, `foreach`/`forvalues`) | **Planned** — see `docs/VARIABLE_SUBSTITUTION.md` |
 | M14b | Runtime stored results (`r()`→subquery, `levelsof`) | **Planned** — see `docs/VARIABLE_SUBSTITUTION.md` |
+| M14c | Named result structs via `let` (`let r = summarize x`, `r.min`) | **Planned (stretch)** — see `docs/VARIABLE_SUBSTITUTION.md` |
 | M15 | `save` to tables, `tempfile`, `preserve`/`restore` | Done |
 | M16 | `xtset`/`tsset` + `L.`/`F.`/`D.` | Done |
 | M17 | `bysort` prefix, `var[_n-1]` | Done |

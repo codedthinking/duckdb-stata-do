@@ -266,6 +266,88 @@ mechanism is identical to B.1 once estimation exists.
 
 ---
 
+## Stretch goal: named result structs via `let`
+
+`r(min)` is legacy: it is **anonymous** (one shared bucket), **volatile** (the next
+r-class command wipes it), and **opaque** (you must know Stata's per-command result
+list). We keep it for compatibility with existing `.do` files, but offer a
+dodo-native alternative that is named, stable, and self-documenting.
+
+### Syntax and why `let`
+
+```stata
+let result = summarize employment
+keep if employment > result.min
+generate z = (employment - result.mean) / result.sd
+```
+
+`let` binds the **stored results of a command to a named struct**, and the fields
+(`result.min`, `result.mean`, `result.N`, …) are referenced by dotted access.
+
+Why a keyword: dodo's parser dispatches on the **first token of every line** —
+that is the invariant that lets the extension distinguish a dodo command from raw
+SQL. A bare `result = summarize employment` would begin with an identifier and
+break that invariant (and collide visually with SQL). `let` joins `DODO_COMMANDS`
+like any other verb, so the line routes cleanly: the handler strips `let`, reads
+`<name> =`, and runs the remainder as a captured command. This mirrors the
+keyword-led design of `local`, `scalar`, `egen`, etc.
+
+### Semantics — it is just a named, non-volatile §B.1
+
+`let NAME = <r-class command>` runs the command in **capture mode**: instead of
+materializing output, it records the command's result fields as `RUNTIME` symbols
+(§B.0) under the namespace `NAME`, each bound to the same frozen subquery B.1 would
+produce against the step the command saw.
+
+| `let result = summarize employment` (step `_s3`) | resolves to |
+|---|---|
+| `result.N` | `(SELECT count(employment) FROM _s3)` |
+| `result.mean` | `(SELECT avg(employment) FROM _s3)` |
+| `result.min` / `result.max` | `(SELECT min/max(employment) FROM _s3)` |
+| `result.sd` | `(SELECT stddev_samp(employment) FROM _s3)` |
+
+`result.min` is resolved exactly like a bare runtime scalar (§B.0): a lookup in the
+symbol table during expression translation, substituting the fragment. Taint
+propagates normally — `scalar lo = result.min - 1` is `RUNTIME`.
+
+Two properties make it strictly better than `r()`:
+
+1. **Not volatile.** A later `summarize`/`count` does **not** disturb `result`.
+   You can hold several at once:
+   ```stata
+   let emp = summarize employment
+   let rev = summarize revenue
+   keep if employment > emp.min & revenue > rev.mean
+   ```
+   This is impossible with `r()`, where the second `summarize` overwrites the first.
+2. **Validated fields.** `result.median` when `summarize` did not compute it is a
+   **compile-time error** listing the available fields — no silent NULLs.
+
+### Unifying `r()` with `let`
+
+`r()` becomes the special case of an **implicit struct named `r`** that every
+r-class command reassigns: `summarize x` is sugar for `let r = summarize x`, and
+`r(min)` is just `r.min` with legacy `()` access. One recording mechanism backs
+both surfaces; the only difference is that `r` is auto-reassigned (hence volatile)
+while a user-named `let` struct is stable. This keeps the implementation single and
+makes the legacy/modern relationship obvious in the docs.
+
+### Scope, state, parity
+
+- A struct is a `RUNTIME` namespace in the symbol table — reuse the §B.0 machinery;
+  add a `std::unordered_map<std::string, std::unordered_map<std::string,std::string>> result_structs;`
+  (`name -> {field -> fragment}`), or fold dotted names straight into `scalars`.
+- **Scope:** session-scoped like `scalar`/`global`, cleared by `clear`. (Open
+  question: do-file vs session scope — leaning session, since a named result is
+  meant to outlive a block. Flag for sign-off.)
+- **Pure compile-time, dodoc-safe.** `let` records fragments and `.field` access
+  emits subqueries; nothing executes, so `dodoc` supports it with no database —
+  same parity guarantee as the rest of Category B.
+- **Sequencing after M14b**, since it is a thin, named re-skin of the `r()`
+  recording it depends on.
+
+---
+
 ## Why not just run the query and paste the value back? (Rejected: the round-trip)
 
 A tempting alternative: when the extension hits `summarize revenue`, actually
@@ -360,6 +442,9 @@ handlers (which already exist for `summarize`/`count`), so it too is shared.
 - **M14b — Runtime stored results (Category B).** `r()` → frozen subqueries from
   `summarize`/`count`, runtime-bound scalars/locals, `levelsof` → set-membership
   rewrites, error paths for impossible unrolls. `e()` deferred with M9.
+- **M14c — Named result structs via `let` (stretch).** `let name = <command>`
+  capture, dotted `name.field` access, field validation, and unifying `r()` as the
+  implicit `r` struct. Thin re-skin of M14b's recording; sequenced after it.
 
 ---
 
